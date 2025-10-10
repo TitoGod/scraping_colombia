@@ -82,6 +82,33 @@ async def run_scraping_by_week(start_date_str, end_date_str, case_state, logger)
             await scrape_by_date_range(week_start_str, week_end_str, case_state, logger)
         current_date = week_end_dt + timedelta(days=1)
 
+# --- NUEVA FUNCIÓN ---
+async def run_scraping_by_day(start_date_str, end_date_str, case_state, logger):
+    """
+    Scrapes data day by day for a given date range.
+    Ideal for periods with a high volume of records to avoid exceeding limits.
+    """
+    start_date = datetime.strptime(start_date_str, "%d/%m/%Y")
+    end_date = datetime.strptime(end_date_str, "%d/%m/%Y")
+    current_date = start_date
+    while current_date <= end_date:
+        # Para el scraping diario, la fecha de inicio y fin es la misma
+        day_str = current_date.strftime("%d/%m/%Y")
+        day_safe = day_str.replace("/", "_")
+        tag = 'ACTIVE' if case_state.strip().lower() == 'active' else 'INACTIVE'
+        # Se guarda un archivo por día
+        output_filename = f'{DOWNLOADS_PATH}{day_safe}_{day_safe}_{tag}.json'
+
+        if os.path.exists(output_filename):
+            logger.info(f"File '{output_filename}' already exists. Skipping day {day_str}.")
+        else:
+            logger.info(f"=== Scraping day ({tag}): {day_str} ===")
+            # Llama a la función de scraping con el mismo día como inicio y fin
+            await scrape_by_date_range(day_str, day_str, case_state, logger)
+        
+        # Avanza al siguiente día
+        current_date += timedelta(days=1)
+
 async def run_full_scraping_process(logger, case_status):
     """Orchestrates all scraping stages by date ranges."""
     logger.info("=========================================================")
@@ -99,7 +126,9 @@ async def run_full_scraping_process(logger, case_status):
     await run_scraping_by_year_interval("01/01/1987", "31/12/1987", 1, case_status, logger)
     await run_scraping_by_year_interval("01/01/1988", "31/12/1988", 1, case_status, logger)
     await run_scraping_by_month("01/01/1989", "30/11/2014", case_status, logger)
-    await run_scraping_by_week("01/12/2014", current_date, case_status, logger)
+    await run_scraping_by_week("01/12/2014", "27/12/2022", case_status, logger)
+    await run_scraping_by_day("28/12/2022", "31/12/2022", case_status, logger)
+    await run_scraping_by_week("01/01/2023", current_date, case_status, logger)
 
     logger.info("=======================================================")
     logger.info("========== DATE-BASED SCRAPING FINISHED ==========")
