@@ -4,6 +4,7 @@ import re
 import os
 import html
 import random
+import rollbar
 from datetime import datetime
 import pandas as pd
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
@@ -233,6 +234,7 @@ async def scrape_by_date_range(start_date, end_date, case_state, logger, headles
                 
         except Exception as e:
             logger.error(f"[scrape_by_date_range] Attempt {global_attempt}/{global_retries} failed for {start_date} - {end_date}: {e}", exc_info=True)
+            rollbar.report_exc_info()
             if global_attempt >= global_retries:
                 logger.critical(f"{start_date} - {end_date} -> Failed after {global_retries} attempts.")
                 return
@@ -296,6 +298,7 @@ async def scrape_by_niza_class(niza_class, logger, headless=True, global_retries
                 
         except Exception as e:
             logger.error(f"[scrape_by_niza_class] Attempt {global_attempt}/{global_retries} failed for Niza {niza_class}: {e}", exc_info=True)
+            rollbar.report_exc_info()
             if global_attempt >= global_retries:
                 logger.critical(f"Niza {niza_class} -> Failed after {global_retries} attempts.")
                 return
@@ -352,6 +355,7 @@ async def scrape_request_by_number(page, request_number, logger):
         return "", "Status not found on results page."
     except Exception as e:
         logger.error(f"Fatal error during scraping of {request_number}: {e}", exc_info=True)
+        rollbar.report_exc_info()
         return "", str(e)
 
 async def run_scraping_for_missing_requests(csv_path, logger):
