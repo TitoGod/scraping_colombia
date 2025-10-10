@@ -1,16 +1,30 @@
 import logging
 import sys
+import os
+import rollbar
 
 def setup_logging():
     """
-    Configures the logging system to log to both a file and the console.
-    Ensures that handlers are not duplicated if called multiple times.
+    Configura el sistema de logging para registrar en un archivo y en la consola,
+    e inicializa Rollbar si está configurado.
     """
     logger = logging.getLogger("etl_app")
     logger.setLevel(logging.INFO)
 
     if logger.hasHandlers():
         return logger
+
+    # Configuración de Rollbar
+    rollbar_access_token = os.getenv('ROLLBAR_ACCESS_TOKEN')
+    if rollbar_access_token:
+        rollbar.init(
+            access_token=rollbar_access_token,
+            environment='production',  # O el entorno que corresponda
+            code_version='1.0.0'
+        )
+        logger.info("Rollbar successfully configured.")
+    else:
+        logger.warning("ROLLBAR_ACCESS_TOKEN not found. Rollbar is not configured.")
 
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 

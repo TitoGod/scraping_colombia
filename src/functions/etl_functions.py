@@ -3,6 +3,7 @@ import sys
 import pandas as pd
 import uuid
 import json
+import rollbar
 from datetime import datetime
 from src.gateways.database_gateway import DatabaseManager
 from src.utils.data_normalizer import DataNormalizer
@@ -99,6 +100,7 @@ def run_full_etl_process(logger):
         logger.info("Main ETL process finished successfully.")
     except Exception as e:
         logger.critical(f"An unexpected error occurred in the ETL process: {e}", exc_info=True)
+        rollbar.report_exc_info()
         sys.exit(1)
 
 def compare_json_vs_db_and_generate_csv(logger):
