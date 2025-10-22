@@ -12,7 +12,8 @@ def setup_logging():
     if logger.hasHandlers():
         return logger
 
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    # Añade %(processName)s para identificar el worker
+    formatter = logging.Formatter('%(asctime)s - %(processName)s - %(levelname)s - %(message)s')
 
     file_handler = logging.FileHandler('etl_process_en.log', encoding='utf-8')
     file_handler.setLevel(logging.INFO)

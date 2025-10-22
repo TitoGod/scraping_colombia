@@ -106,14 +106,14 @@ async def run_scraping_by_day(start_date_str, end_date_str, case_state, logger):
         current_date += timedelta(days=1)
 
 # --- NUEVA FUNCIÓN PARTE 1 ---
-async def run_scraping_historical_part(logger, case_status):
+async def run_scraping_historical_part(logger, case_status, context_tag="[Scraping]"):
     """
     Ejecuta la primera parte (histórica) del scraping por fechas (1900-2014).
     """
     logger.info(f"--- Iniciando Scraping Parte 1 (Histórico) para Status: '{case_status.upper()}' ---")
     try:
         rollbar.report_message(
-            f"Iniciando scraping Parte 1 (Histórico, Status: {case_status.upper()})", 
+            f"{context_tag} Iniciando scraping Parte 1 (Histórico, Status: {case_status.upper()})", 
             "info"
         )
     except Exception as e:
@@ -131,7 +131,7 @@ async def run_scraping_historical_part(logger, case_status):
     logger.info("--- Scraping Parte 1 (Histórico) FINALIZADO ---")
 
 # --- NUEVA FUNCIÓN PARTE 2 ---
-async def run_scraping_recent_part(logger, case_status):
+async def run_scraping_recent_part(logger, case_status, context_tag="[Scraping]"):
     """
     Ejecuta la segunda parte (reciente y más intensiva) del scraping por fechas (2014-Presente).
     """
@@ -140,7 +140,7 @@ async def run_scraping_recent_part(logger, case_status):
     
     try:
         rollbar.report_message(
-            f"Iniciando scraping Parte 2 (Reciente, Status: {case_status.upper()})", 
+            f"{context_tag} Iniciando scraping Parte 2 (Reciente, Status: {case_status.upper()})", 
             "info"
         )
     except Exception as e:
@@ -169,11 +169,11 @@ async def run_full_scraping_process(logger, case_status):
     logger.info("========== DATE-BASED SCRAPING FINISHED ==========")
     logger.info("=======================================================")
 
-async def run_niza_class_scraping(logger):
+async def run_niza_class_scraping(logger, context_tag="[Scraping]"):
     """Executes scraping for all Niza classes (1-44)."""
 
     try:
-        rollbar.report_message("Iniciando scraping por Niza class (1-45)", "info")
+        rollbar.report_message(f"{context_tag} Iniciando scraping por Niza class (1-45)", "info")
     except Exception as e:
         logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
 
@@ -186,6 +186,6 @@ async def run_niza_class_scraping(logger):
             await scrape_by_niza_class(niza_class, logger, headless=True)
 
     try:
-        rollbar.report_message("Scraping por Niza class finalizado con éxito", "success")
+        rollbar.report_message(f"{context_tag} Scraping por Niza class finalizado con éxito", "success")
     except Exception as e:
         logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
