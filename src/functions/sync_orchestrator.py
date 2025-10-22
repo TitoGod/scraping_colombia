@@ -25,7 +25,7 @@ def _init_rollbar_in_worker(logger):
         load_dotenv() # Los procesos hijos necesitan cargar esto
         
         ROLLBAR_TOKEN = os.getenv("ROLLBAR_TOKEN")
-        ENV_STAGE = os.getenv("ENV_STAGE", "dev")
+        ENV_STAGE = os.getenv("ENV_STAGE")
 
         if ROLLBAR_TOKEN:
             rollbar.init(
@@ -46,7 +46,7 @@ def _scrape_worker_1(case_status):
     Worker Proceso 1: Ejecuta Niza + Scraping Histórico (1900-2014).
     """
     logger = setup_logging()
-    _init_rollbar_in_worker(logger) # Inicializa el logger en este nuevo proceso
+    # _init_rollbar_in_worker(logger) # Inicializa el logger en este nuevo proceso
     logger.info("--- [Proceso 1] INICIANDO (Niza + Fechas Históricas) ---")
     try:
         async def worker_1_main_tasks():
@@ -76,7 +76,7 @@ def _scrape_worker_2(case_status):
     Worker Proceso 2: Ejecuta Scraping Reciente (2014-Presente).
     """
     logger = setup_logging() # Inicializa el logger en este nuevo proceso
-    _init_rollbar_in_worker(logger)
+    # _init_rollbar_in_worker(logger)
     logger.info(f"--- [Proceso 2] INICIANDO (Fechas Recientes, Status: {case_status}) ---")
     try:
         async def worker_2_main_task():
