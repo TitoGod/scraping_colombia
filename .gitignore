@@ -50,3 +50,6 @@ Thumbs.db
 
 # Environment variables local file
 *.env
+
+# Archivos varios
+test_rollbar.py
