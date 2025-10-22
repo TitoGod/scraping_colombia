@@ -105,18 +105,15 @@ async def run_scraping_by_day(start_date_str, end_date_str, case_state, logger):
         
         current_date += timedelta(days=1)
 
-async def run_full_scraping_process(logger, case_status):
-    """Orchestrates all scraping stages by date ranges."""
-    logger.info("=========================================================")
-    logger.info("========== START OF DATE-BASED SCRAPING ==========")
-    logger.info("=========================================================")
-
-    current_date = date.today().strftime('%d/%m/%Y')
-    logger.info(f"\n--- STARTING DATE-BASED SCRAPING FOR TRADEMARKS WITH STATUS: '{case_status.upper()}' ---\n")
-
+# --- NUEVA FUNCIÓN PARTE 1 ---
+async def run_scraping_historical_part(logger, case_status):
+    """
+    Ejecuta la primera parte (histórica) del scraping por fechas (1900-2014).
+    """
+    logger.info(f"--- Iniciando Scraping Parte 1 (Histórico) para Status: '{case_status.upper()}' ---")
     try:
         rollbar.report_message(
-            f"Iniciando scraping por rango de fechas (Status: {case_status.upper()})", 
+            f"Iniciando scraping Parte 1 (Histórico, Status: {case_status.upper()})", 
             "info"
         )
     except Exception as e:
@@ -130,17 +127,43 @@ async def run_full_scraping_process(logger, case_status):
     await run_scraping_by_year_interval("01/01/1987", "31/12/1987", 1, case_status, logger)
     await run_scraping_by_year_interval("01/01/1988", "31/12/1988", 1, case_status, logger)
     await run_scraping_by_month("01/01/1989", "30/11/2014", case_status, logger)
-    await run_scraping_by_week("01/12/2014", "27/12/2022", case_status, logger)
-    await run_scraping_by_day("28/12/2022", "31/12/2022", case_status, logger)
-    await run_scraping_by_week("01/01/2023", current_date, case_status, logger)
+    
+    logger.info("--- Scraping Parte 1 (Histórico) FINALIZADO ---")
 
+# --- NUEVA FUNCIÓN PARTE 2 ---
+async def run_scraping_recent_part(logger, case_status):
+    """
+    Ejecuta la segunda parte (reciente y más intensiva) del scraping por fechas (2014-Presente).
+    """
+    logger.info(f"--- Iniciando Scraping Parte 2 (Reciente) para Status: '{case_status.upper()}' ---")
+    current_date = date.today().strftime('%d/%m/%Y')
+    
     try:
         rollbar.report_message(
-            f"Scraping por rango de fechas finalizado (Status: {case_status.upper()})", 
-            "success"
+            f"Iniciando scraping Parte 2 (Reciente, Status: {case_status.upper()})", 
+            "info"
         )
     except Exception as e:
         logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
+
+    await run_scraping_by_week("01/12/2014", "27/12/2022", case_status, logger)
+    await run_scraping_by_day("28/12/2022", "31/12/2022", case_status, logger)
+    await run_scraping_by_week("01/01/2023", current_date, case_status, logger)
+    
+    logger.info("--- Scraping Parte 2 (Reciente) FINALIZADO ---")
+
+# --- FUNCIÓN PRINCIPAL MODIFICADA ---
+async def run_full_scraping_process(logger, case_status):
+    """
+    Orquesta todas las etapas de scraping por rango de fechas (ahora modularizado).
+    """
+    logger.info("=========================================================")
+    logger.info("========== START OF DATE-BASED SCRAPING ==========")
+    logger.info("=========================================================")
+    
+    # Llama a las dos partes en secuencia
+    await run_scraping_historical_part(logger, case_status)
+    await run_scraping_recent_part(logger, case_status)
 
     logger.info("=======================================================")
     logger.info("========== DATE-BASED SCRAPING FINISHED ==========")
