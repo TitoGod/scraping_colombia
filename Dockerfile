@@ -12,5 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 4. Copiar todo el código fuente del proyecto al contenedor
 COPY . .
 
+VOLUME ["/app/tmp", "/app/etl_process_en.log"]
+
 # 5. Definir el comando por defecto para ejecutar la aplicación
 ENTRYPOINT ["python", "-m", "src.handler.sync_colombia_trademarks"]
