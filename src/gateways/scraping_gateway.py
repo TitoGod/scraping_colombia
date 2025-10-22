@@ -234,7 +234,6 @@ async def scrape_by_date_range(start_date, end_date, case_state, logger, headles
                 
         except Exception as e:
             logger.error(f"[scrape_by_date_range] Attempt {global_attempt}/{global_retries} failed for {start_date} - {end_date}: {e}", exc_info=True)
-            rollbar.report_exc_info()
             if global_attempt >= global_retries:
                 logger.critical(f"{start_date} - {end_date} -> Failed after {global_retries} attempts.")
                 return
@@ -288,6 +287,24 @@ async def scrape_by_niza_class(niza_class, logger, headless=True, global_retries
                     logger.warning(f"SKIPPED RANGE: Niza class {niza_class} exceeded the 2000 trademark limit.")
                     await browser.close()
                     return
+
+                try:
+                    pager_selector = "#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases tr.gridview_pager"
+                    if await page.locator(pager_selector).count() > 0:
+                        logger.info("Configuring results view...")
+                        column_dropdown = page.locator(f"{pager_selector} select.no-print")
+                        if await column_dropdown.count() > 0:
+                            logger.info(" -> Showing 'Filing Date' column...")
+                            await column_dropdown.select_option(label="Mostrar : Fecha de radicación")
+                            await page.wait_for_load_state('networkidle', timeout=60000)
+                            
+                        results_per_page_dropdown = page.locator(f"{pager_selector} select:not(.no-print)")
+                        if await results_per_page_dropdown.count() > 0:
+                            logger.info(" -> Changing to 200 results per page...")
+                            await results_per_page_dropdown.select_option(value="200")
+                            await page.wait_for_load_state('networkidle', timeout=60000)
+                except Exception as e:
+                    logger.warning(f"An error occurred while configuring the results view. Continuing. Error: {e}")
                     
                 list_cases = await extract_all_pages_data(page, logger)
                 with open(output_filename, 'w', encoding='utf-8') as json_file:
@@ -298,7 +315,6 @@ async def scrape_by_niza_class(niza_class, logger, headless=True, global_retries
                 
         except Exception as e:
             logger.error(f"[scrape_by_niza_class] Attempt {global_attempt}/{global_retries} failed for Niza {niza_class}: {e}", exc_info=True)
-            rollbar.report_exc_info()
             if global_attempt >= global_retries:
                 logger.critical(f"Niza {niza_class} -> Failed after {global_retries} attempts.")
                 return
@@ -355,7 +371,6 @@ async def scrape_request_by_number(page, request_number, logger):
         return "", "Status not found on results page."
     except Exception as e:
         logger.error(f"Fatal error during scraping of {request_number}: {e}", exc_info=True)
-        rollbar.report_exc_info()
         return "", str(e)
 
 async def run_scraping_for_missing_requests(csv_path, logger):
@@ -376,6 +391,14 @@ async def run_scraping_for_missing_requests(csv_path, logger):
         return None
         
     logger.info(f"{len(requests_to_process)} records from the CSV will be processed.")
+
+    try:
+        rollbar.report_message(
+            f"Iniciando scraping de corrección por request_number ({len(requests_to_process)} records)",
+            "info"
+        )
+    except Exception as e:
+        logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
     
     all_results = []
     output_json_path = os.path.join(DOWNLOADS_PATH, f"missing_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
@@ -403,6 +426,15 @@ async def run_scraping_for_missing_requests(csv_path, logger):
             with open(output_json_path, 'w', encoding='utf-8') as f:
                 json.dump(all_results, f, indent=4, ensure_ascii=False)
             logger.info(f"Process finished. Final results saved to '{output_json_path}'.")
+
+            try:
+                rollbar.report_message(
+                    f"Scraping de corrección por request_number finalizado ({len(all_results)} records procesados)",
+                    "success"
+                )
+            except Exception as e:
+                logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
+                
         else:
             logger.warning("No results were generated to save.")
 

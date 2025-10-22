@@ -1,6 +1,7 @@
 import os
 from datetime import date, datetime, timedelta
 import calendar
+import rollbar
 from src.utils.constants import PATHS
 from src.gateways.scraping_gateway import (
     scrape_by_date_range,
@@ -82,7 +83,6 @@ async def run_scraping_by_week(start_date_str, end_date_str, case_state, logger)
             await scrape_by_date_range(week_start_str, week_end_str, case_state, logger)
         current_date = week_end_dt + timedelta(days=1)
 
-# --- NUEVA FUNCIÓN ---
 async def run_scraping_by_day(start_date_str, end_date_str, case_state, logger):
     """
     Scrapes data day by day for a given date range.
@@ -92,21 +92,17 @@ async def run_scraping_by_day(start_date_str, end_date_str, case_state, logger):
     end_date = datetime.strptime(end_date_str, "%d/%m/%Y")
     current_date = start_date
     while current_date <= end_date:
-        # Para el scraping diario, la fecha de inicio y fin es la misma
         day_str = current_date.strftime("%d/%m/%Y")
         day_safe = day_str.replace("/", "_")
         tag = 'ACTIVE' if case_state.strip().lower() == 'active' else 'INACTIVE'
-        # Se guarda un archivo por día
         output_filename = f'{DOWNLOADS_PATH}{day_safe}_{day_safe}_{tag}.json'
 
         if os.path.exists(output_filename):
             logger.info(f"File '{output_filename}' already exists. Skipping day {day_str}.")
         else:
             logger.info(f"=== Scraping day ({tag}): {day_str} ===")
-            # Llama a la función de scraping con el mismo día como inicio y fin
             await scrape_by_date_range(day_str, day_str, case_state, logger)
         
-        # Avanza al siguiente día
         current_date += timedelta(days=1)
 
 async def run_full_scraping_process(logger, case_status):
@@ -117,6 +113,14 @@ async def run_full_scraping_process(logger, case_status):
 
     current_date = date.today().strftime('%d/%m/%Y')
     logger.info(f"\n--- STARTING DATE-BASED SCRAPING FOR TRADEMARKS WITH STATUS: '{case_status.upper()}' ---\n")
+
+    try:
+        rollbar.report_message(
+            f"Iniciando scraping por rango de fechas (Status: {case_status.upper()})", 
+            "info"
+        )
+    except Exception as e:
+        logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
 
     await run_scraping_by_year_interval("02/01/1900", "31/12/1970", 71, case_status, logger)
     await run_scraping_by_year_interval("01/01/1971", "31/12/1975", 5, case_status, logger)
@@ -130,16 +134,35 @@ async def run_full_scraping_process(logger, case_status):
     await run_scraping_by_day("28/12/2022", "31/12/2022", case_status, logger)
     await run_scraping_by_week("01/01/2023", current_date, case_status, logger)
 
+    try:
+        rollbar.report_message(
+            f"Scraping por rango de fechas finalizado (Status: {case_status.upper()})", 
+            "success"
+        )
+    except Exception as e:
+        logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
+
     logger.info("=======================================================")
     logger.info("========== DATE-BASED SCRAPING FINISHED ==========")
     logger.info("=======================================================")
 
 async def run_niza_class_scraping(logger):
-    """Executes scraping for all Niza classes (1-45)."""
-    for niza_class in range(1, 46):
+    """Executes scraping for all Niza classes (1-44)."""
+
+    try:
+        rollbar.report_message("Iniciando scraping por Niza class (1-45)", "info")
+    except Exception as e:
+        logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
+
+    for niza_class in range(1, 45):
         output_filename = f'{DOWNLOADS_PATH}niza_{niza_class}_1900_1900_ACTIVE.json'
         if os.path.exists(output_filename):
             logger.info(f"File '{output_filename}' already exists. Skipping Niza class {niza_class}.")
         else:
             logger.info(f"=== Scraping Niza Class ({'ACTIVE'}): {niza_class} ===")
             await scrape_by_niza_class(niza_class, logger, headless=True)
+
+    try:
+        rollbar.report_message("Scraping por Niza class finalizado con éxito", "success")
+    except Exception as e:
+        logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")

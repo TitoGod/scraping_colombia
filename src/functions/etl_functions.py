@@ -8,7 +8,8 @@ from datetime import datetime
 from src.gateways.database_gateway import DatabaseManager
 from src.utils.data_normalizer import DataNormalizer
 from src.gateways.scraping_gateway import run_scraping_for_missing_requests
-from src.utils.constants import PATHS
+from src.utils.constants import PATHS, S3_PATHS
+from src.gateways.s3_gateway import S3Manager
 
 JSON_FOLDER_PATH = PATHS["tmp_path"]
 
@@ -79,6 +80,12 @@ def run_full_etl_process(logger):
         pd.DataFrame(report_data).to_csv(csv_report_path, index=False, encoding="utf-8")
         logger.info(f"Step 4.1: Exported CSV report to '{csv_report_path}'")
         
+        try:
+            s3_manager = S3Manager(bucket_name=S3_PATHS["bucket_name"], logger=logger)
+            s3_manager.upload_file(csv_report_path, S3_PATHS["reports_folder"])
+        except Exception as e:
+            logger.error(f"Failed to upload CSV report to S3: {e}")
+
         df_to_insert = df_new.loc[records_to_insert_indices].copy()
         if not df_to_insert.empty:
             df_to_insert['id'] = [str(uuid.uuid4()) for _ in range(len(df_to_insert))]
@@ -96,16 +103,32 @@ def run_full_etl_process(logger):
             db_cols_list = df_db.columns.tolist() if not df_db.empty else []
             cols_to_pass = [col for col in df_to_update.columns if col in db_cols_list or col == 'updated_at' or col == 'request_number']
             db_manager.update_records(df_to_update[cols_to_pass])
+
+        try:
+            rollbar.report_message(
+                f"ETL: Base de datos actualizada ({len(records_to_insert_indices)} nuevos, {len(records_to_update_indices)} modificados)",
+                "info"
+            )
+        except Exception as e:
+            logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
             
         logger.info("Main ETL process finished successfully.")
     except Exception as e:
         logger.critical(f"An unexpected error occurred in the ETL process: {e}", exc_info=True)
-        rollbar.report_exc_info()
         sys.exit(1)
 
 def compare_json_vs_db_and_generate_csv(logger):
     """Compares 'request_number' from JSONs vs. the DB and generates a CSV with missing ones."""
     logger.info("Starting comparison of JSONs vs. Database for active records...")
+
+    try:
+        rollbar.report_message(
+            "Iniciando Comparación (JSONs vs DB) para corrección de faltantes",
+            "info"
+        )
+    except Exception as e:
+        logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
+
     db_params = {"user": os.getenv("PG_USER"), "password": os.getenv("PG_PASS"), "host": os.getenv("PG_HOST"), "port": os.getenv("PG_PORT"), "database": os.getenv("PG_DB")}
     table_name = os.getenv("TABLE")
     if not all(db_params.values()) or not table_name:
@@ -131,11 +154,24 @@ def compare_json_vs_db_and_generate_csv(logger):
     df_missing.to_csv(csv_path, index=False, encoding="utf-8")
     
     logger.info(f"Generated file '{csv_path}' with the missing records.")
+    
+    s3_manager = S3Manager(bucket_name=S3_PATHS["bucket_name"], logger=logger)
+    s3_manager.upload_file(csv_path, S3_PATHS["reports_folder"])
+    
     return csv_path
 
 def update_statuses_from_json(json_path, logger):
     """Reads a JSON with updated statuses and applies them to the database."""
     logger.info(f"Starting status update from file '{json_path}'...")
+
+    try:
+        rollbar.report_message(
+            f"Iniciando actualización de DB (Corrección) desde: {json_path}",
+            "info"
+        )
+    except Exception as e:
+        logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
+
     db_params = {"user": os.getenv("PG_USER"), "password": os.getenv("PG_PASS"), "host": os.getenv("PG_HOST"), "port": os.getenv("PG_PORT"), "database": os.getenv("PG_DB")}
     table_name = os.getenv("TABLE")
     if not all(db_params.values()) or not table_name:
@@ -174,6 +210,15 @@ def update_statuses_from_json(json_path, logger):
     if records_for_db:
         db_manager = DatabaseManager(db_params, table_name, logger)
         db_manager.update_record_statuses(records_for_db)
+
+        try:
+            rollbar.report_message(
+                f"Actualización de DB (Corrección) finalizada ({len(records_for_db)} records actualizados)",
+                "success"
+            )
+        except Exception as e:
+            logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
+            
     else:
         logger.info("No valid records found in the JSON to update in the database.")
 

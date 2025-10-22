@@ -22,5 +22,5 @@ if __name__ == '__main__':
     event_params = {
         "case_status": args.status
     }
-    print(f"Running handler locally with event: {json.dumps(event_params, indent=2)}")
+    print(f"Running handler with event: {json.dumps(event_params, indent=2)}")
     container_handler(event_params)

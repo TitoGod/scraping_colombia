@@ -1,5 +1,4 @@
 import os
-import rollbar
 import pandas as pd
 import psycopg2
 import psycopg2.extras
@@ -58,7 +57,6 @@ class DatabaseManager:
                 self.logger.info(f"Successfully completed update of {len(data_tuples)} statuses.")
         except Exception as e:
             self.logger.error(f"Error updating statuses in the database: {e}")
-            rollbar.report_exc_info()
             if conn: conn.rollback()
         finally:
             if conn: conn.close()
@@ -76,7 +74,6 @@ class DatabaseManager:
             return df
         except Exception as e:
             self.logger.critical(f"CRITICAL error connecting to or fetching data from the database: {e}")
-            rollbar.report_exc_info()
             return pd.DataFrame()
         finally:
             if conn: conn.close()
@@ -100,7 +97,6 @@ class DatabaseManager:
                 self.logger.info("Insertion completed successfully.")
         except Exception as e:
             self.logger.error(f"Error inserting into the database: {e}")
-            rollbar.report_exc_info()
             if conn: conn.rollback()
         finally:
             if conn: conn.close()
@@ -127,7 +123,6 @@ class DatabaseManager:
                 self.logger.info("Update completed successfully.")
         except Exception as e:
             self.logger.error(f"Error updating the database: {e}")
-            rollbar.report_exc_info()
             if conn: conn.rollback()
         finally:
             if conn: conn.close()
