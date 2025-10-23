@@ -214,7 +214,7 @@ def update_statuses_from_json(json_path, logger):
         try:
             rollbar.report_message(
                 f"Actualización de DB (Corrección) finalizada ({len(records_for_db)} records actualizados)",
-                "success"
+                "info"
             )
         except Exception as e:
             logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")

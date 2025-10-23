@@ -14,30 +14,6 @@ from src.functions.etl_functions import run_full_etl_process, run_verification_a
 from src.utils.constants import PATHS
 from src.utils.logging_config import setup_logging
 
-# --- NUEVA FUNCIÓN DE AYUDA ---
-def _init_rollbar_in_worker(logger):
-    """
-    Carga .env e inicializa Rollbar DENTRO de un proceso worker.
-    Esto es crucial porque los procesos hijos no heredan la config de Rollbar.
-    """
-    try:
-        logger.info("Cargando variables de entorno (.env) para el worker...")
-        load_dotenv() # Los procesos hijos necesitan cargar esto
-        
-        ROLLBAR_TOKEN = os.getenv("ROLLBAR_TOKEN")
-        ENV_STAGE = os.getenv("ENV_STAGE")
-
-        if ROLLBAR_TOKEN:
-            rollbar.init(
-                access_token=ROLLBAR_TOKEN,
-                environment=ENV_STAGE
-            )
-            logger.info(f"Rollbar inicializado para el worker en entorno: '{ENV_STAGE}'.")
-        else:
-            logger.warning("ROLLBAR_TOKEN no encontrado en el worker. Los reportes de Rollbar fallarán.")
-            
-    except Exception as e:
-        logger.error(f"Error inicializando Rollbar en el worker: {e}", exc_info=True)
 
 # --- Funciones Worker para Multiprocessing ---
 
@@ -46,7 +22,6 @@ def _scrape_worker_1(case_status):
     Worker Proceso 1: Ejecuta Niza + Scraping Histórico (1900-2014).
     """
     logger = setup_logging()
-    # _init_rollbar_in_worker(logger) # Inicializa el logger en este nuevo proceso
     logger.info("--- [Proceso 1] INICIANDO (Niza + Fechas Históricas) ---")
     try:
         async def worker_1_main_tasks():
@@ -76,7 +51,6 @@ def _scrape_worker_2(case_status):
     Worker Proceso 2: Ejecuta Scraping Reciente (2014-Presente).
     """
     logger = setup_logging() # Inicializa el logger en este nuevo proceso
-    # _init_rollbar_in_worker(logger)
     logger.info(f"--- [Proceso 2] INICIANDO (Fechas Recientes, Status: {case_status}) ---")
     try:
         async def worker_2_main_task():
@@ -164,7 +138,7 @@ def run_sync_process(logger, case_status):
         try:
             rollbar.report_message(
                 f"Proceso de sync finalizado con ÉXITO (Status: {case_status.upper()})", 
-                "success"
+                "info"
             )
         except Exception as e:
             logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")

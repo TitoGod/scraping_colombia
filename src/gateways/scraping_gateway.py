@@ -229,6 +229,12 @@ async def scrape_by_date_range(start_date, end_date, case_state, logger, headles
                 with open(output_filename, 'w', encoding='utf-8') as json_file:
                     json.dump(list_cases, json_file, ensure_ascii=False, indent=4)
                 logger.info(f"SUCCESS: Saved {len(list_cases)} records ({output_tag}) for the range {start_date} - {end_date}.")
+
+                # Pausa aleatoria entre 5 y 15 segundos antes de la siguiente iteración
+                pause_time = random.randint(5, 15)
+                logger.info(f"Pausa de {pause_time} segundos para simular comportamiento humano.")
+                await asyncio.sleep(pause_time) 
+                                                       
                 await browser.close()
                 return
                 
@@ -430,7 +436,7 @@ async def run_scraping_for_missing_requests(csv_path, logger):
             try:
                 rollbar.report_message(
                     f"Scraping de corrección por request_number finalizado ({len(all_results)} records procesados)",
-                    "success"
+                    "info"
                 )
             except Exception as e:
                 logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
