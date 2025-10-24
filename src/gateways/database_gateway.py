@@ -61,7 +61,38 @@ class DatabaseManager:
         finally:
             if conn: conn.close()
 
+    #[--- NUEVA FUNCIÓN ---]
+    def fetch_records_by_request_numbers(self, request_numbers_list):
+        """Busca en la BD solo los registros que coinciden con la lista de request_numbers."""
+        if not request_numbers_list:
+            self.logger.info("fetch_records_by_request_numbers recibió una lista vacía. Saltando consulta.")
+            return pd.DataFrame()
+            
+        columns_to_fetch = ["request_number", "registry_number", "denomination", "logo_url", "filing_date", "expiration_date", "status", "holder", "niza_class", "gazette_number"]
+        columns_str = ", ".join([f'"{col}"' for col in columns_to_fetch])
+        self.logger.info(f"Buscando {len(request_numbers_list)} registros específicos en la DB...")
+        conn = None
+        try:
+            conn = psycopg2.connect(**self.db_params)
+            # Usamos ANY(ARRAY[...]) para una búsqueda eficiente en la lista
+            # psycopg2 manejará la conversión de la lista de Python
+            query = f"SELECT {columns_str} FROM {self.table_name} WHERE badger_country = 'COLOMBIA' AND request_number = ANY(%s);"
+            
+            df = pd.read_sql_query(query, conn, params=(request_numbers_list,))
+            self.logger.info(f"Se encontraron {len(df)} registros coincidentes en la DB.")
+            return df
+        except Exception as e:
+            self.logger.error(f"Error buscando registros por lista: {e}", exc_info=True)
+            return pd.DataFrame()
+        finally:
+            if conn: conn.close()
+
     def fetch_all_records(self):
+        #[--- COMENTARIO MODIFICADO ---]
+        """
+        ¡ADVERTENCIA! Esta función puede causar OOM (Out-of-Memory) si la tabla es muy grande.
+        Usar 'fetch_records_by_request_numbers' en su lugar para ETL en lotes.
+        """
         columns_to_fetch = ["request_number", "registry_number", "denomination", "logo_url", "filing_date", "expiration_date", "status", "holder", "niza_class", "gazette_number"]
         columns_str = ", ".join([f'"{col}"' for col in columns_to_fetch])
         self.logger.info(f"Step 2: Connecting to DB and fetching ALL data from '{self.table_name}'...")
