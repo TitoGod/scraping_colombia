@@ -1,5 +1,6 @@
 import os
 import boto3
+import rollbar
 from botocore.exceptions import NoCredentialsError
 
 class S3Manager:
@@ -32,7 +33,9 @@ class S3Manager:
             return False
         except NoCredentialsError:
             self.logger.error("AWS credentials not found or are invalid. Please configure your environment variables.")
+            rollbar.report_exc_info()
             return False
         except Exception as e:
             self.logger.error(f"An error occurred while uploading to S3: {e}")
+            rollbar.report_exc_info()
             return False

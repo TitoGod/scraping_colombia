@@ -10,7 +10,7 @@ from src.gateways.scraping_gateway import (
 
 DOWNLOADS_PATH = PATHS["tmp_path"]
 
-async def run_scraping_by_year_interval(start_date_str, end_date_str, year_interval, case_state, logger):
+async def run_scraping_by_year_interval(page, start_date_str, end_date_str, year_interval, case_state, logger):
     start_date = datetime.strptime(start_date_str, "%d/%m/%Y")
     end_date = datetime.strptime(end_date_str, "%d/%m/%Y")
     current_date = start_date
@@ -37,10 +37,10 @@ async def run_scraping_by_year_interval(start_date_str, end_date_str, year_inter
             logger.info(f"File '{output_filename}' already exists. Skipping interval.")
         else:
             logger.info(f"=== Scraping {year_interval}-year interval ({tag}): {interval_start_str} -> {interval_end_str} ===")
-            await scrape_by_date_range(interval_start_str, interval_end_str, case_state, logger)
+            await scrape_by_date_range(page, interval_start_str, interval_end_str, case_state, logger)
         current_date = interval_end_dt + timedelta(days=1)
 
-async def run_scraping_by_month(start_date_str, end_date_str, case_state, logger):
+async def run_scraping_by_month(page, start_date_str, end_date_str, case_state, logger):
     start_date = datetime.strptime(start_date_str, "%d/%m/%Y")
     end_date = datetime.strptime(end_date_str, "%d/%m/%Y")
     current_date = start_date
@@ -59,10 +59,10 @@ async def run_scraping_by_month(start_date_str, end_date_str, case_state, logger
             logger.info(f"File '{output_filename}' already exists. Skipping month {current_date.strftime('%Y-%m')}.")
         else:
             logger.info(f"=== Scraping month ({tag}): {month_start_str} -> {month_end_str} ===")
-            await scrape_by_date_range(month_start_str, month_end_str, case_state, logger)
+            await scrape_by_date_range(page, month_start_str, month_end_str, case_state, logger)
         current_date = month_end_dt + timedelta(days=1)
 
-async def run_scraping_by_week(start_date_str, end_date_str, case_state, logger):
+async def run_scraping_by_week(page, start_date_str, end_date_str, case_state, logger):
     start_date = datetime.strptime(start_date_str, "%d/%m/%Y")
     end_date = datetime.strptime(end_date_str, "%d/%m/%Y")
     current_date = start_date
@@ -80,10 +80,10 @@ async def run_scraping_by_week(start_date_str, end_date_str, case_state, logger)
             logger.info(f"File '{output_filename}' already exists. Skipping week {week_start_str} - {week_end_str}.")
         else:
             logger.info(f"=== Scraping week ({tag}): {week_start_str} -> {week_end_str} ===")
-            await scrape_by_date_range(week_start_str, week_end_str, case_state, logger)
+            await scrape_by_date_range(page, week_start_str, week_end_str, case_state, logger)
         current_date = week_end_dt + timedelta(days=1)
 
-async def run_scraping_by_day(start_date_str, end_date_str, case_state, logger):
+async def run_scraping_by_day(page, start_date_str, end_date_str, case_state, logger):
     """
     Scrapes data day by day for a given date range.
     Ideal for periods with a high volume of records to avoid exceeding limits.
@@ -101,12 +101,11 @@ async def run_scraping_by_day(start_date_str, end_date_str, case_state, logger):
             logger.info(f"File '{output_filename}' already exists. Skipping day {day_str}.")
         else:
             logger.info(f"=== Scraping day ({tag}): {day_str} ===")
-            await scrape_by_date_range(day_str, day_str, case_state, logger)
+            await scrape_by_date_range(page, day_str, day_str, case_state, logger)
         
         current_date += timedelta(days=1)
 
-# --- NUEVA FUNCIÓN PARTE 1 ---
-async def run_scraping_historical_part(logger, case_status, context_tag="[Scraping]"):
+async def run_scraping_historical_part(page, logger, case_status, context_tag="[Scraping]"):
     """
     Ejecuta la primera parte (histórica) del scraping por fechas (1900-2014).
     """
@@ -119,14 +118,15 @@ async def run_scraping_historical_part(logger, case_status, context_tag="[Scrapi
     except Exception as e:
         logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
 
-    await run_scraping_by_year_interval("02/01/1900", "31/12/1970", 71, case_status, logger)
-    await run_scraping_by_year_interval("01/01/1971", "31/12/1975", 5, case_status, logger)
-    await run_scraping_by_year_interval("01/01/1976", "31/12/1980", 5, case_status, logger)
-    await run_scraping_by_year_interval("01/01/1981", "31/12/1985", 5, case_status, logger)
-    await run_scraping_by_year_interval("01/01/1986", "31/12/1986", 1, case_status, logger)
-    await run_scraping_by_year_interval("01/01/1987", "31/12/1987", 1, case_status, logger)
-    await run_scraping_by_year_interval("01/01/1988", "31/12/1988", 1, case_status, logger)
-    await run_scraping_by_month("01/01/1989", "30/11/2014", case_status, logger)
+    await run_scraping_by_year_interval(page, "02/01/1900", "31/12/1970", 71, case_status, logger)
+    await run_scraping_by_year_interval(page, "01/01/1971", "31/12/1975", 5, case_status, logger)
+    await run_scraping_by_year_interval(page, "01/01/1976", "31/12/1980", 5, case_status, logger)
+    await run_scraping_by_year_interval(page, "01/01/1981", "31/12/1985", 5, case_status, logger)
+    await run_scraping_by_year_interval(page, "01/01/1986", "31/12/1986", 1, case_status, logger)
+    await run_scraping_by_year_interval(page, "01/01/1987", "31/12/1987", 1, case_status, logger)
+    await run_scraping_by_year_interval(page, "01/01/1988", "31/12/1988", 1, case_status, logger)
+    await run_scraping_by_month(page, "01/01/1989", "30/11/2014", case_status, logger)
+    await run_scraping_by_week(page, "01/12/2014", "31/12/2018", case_status, logger)
     
     logger.info("--- Scraping Parte 1 (Histórico) FINALIZADO ---")
 
@@ -138,8 +138,7 @@ async def run_scraping_historical_part(logger, case_status, context_tag="[Scrapi
     except Exception as e:
         logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
 
-# --- NUEVA FUNCIÓN PARTE 2 ---
-async def run_scraping_recent_part(logger, case_status, context_tag="[Scraping]"):
+async def run_scraping_recent_part(page, logger, case_status, context_tag="[Scraping]"):
     """
     Ejecuta la segunda parte (reciente y más intensiva) del scraping por fechas (2014-Presente).
     """
@@ -154,9 +153,9 @@ async def run_scraping_recent_part(logger, case_status, context_tag="[Scraping]"
     except Exception as e:
         logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
 
-    await run_scraping_by_week("01/12/2014", "27/12/2022", case_status, logger)
-    await run_scraping_by_day("28/12/2022", "31/12/2022", case_status, logger)
-    await run_scraping_by_week("01/01/2023", current_date, case_status, logger)
+    await run_scraping_by_week(page, "01/01/2019", "27/12/2022", case_status, logger)
+    await run_scraping_by_day(page, "28/12/2022", "31/12/2022", case_status, logger)
+    await run_scraping_by_week(page, "01/01/2023", current_date, case_status, logger)
     
     logger.info("--- Scraping Parte 2 (Reciente) FINALIZADO ---")
 
@@ -168,8 +167,7 @@ async def run_scraping_recent_part(logger, case_status, context_tag="[Scraping]"
     except Exception as e:
         logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
 
-# --- FUNCIÓN PRINCIPAL MODIFICADA ---
-async def run_full_scraping_process(logger, case_status):
+async def run_full_scraping_process(page, logger, case_status):
     """
     Orquesta todas las etapas de scraping por rango de fechas (ahora modularizado).
     """
@@ -177,15 +175,14 @@ async def run_full_scraping_process(logger, case_status):
     logger.info("========== START OF DATE-BASED SCRAPING ==========")
     logger.info("=========================================================")
     
-    # Llama a las dos partes en secuencia
-    await run_scraping_historical_part(logger, case_status)
-    await run_scraping_recent_part(logger, case_status)
+    await run_scraping_historical_part(page, logger, case_status)
+    await run_scraping_recent_part(page, logger, case_status)
 
     logger.info("=======================================================")
     logger.info("========== DATE-BASED SCRAPING FINISHED ==========")
     logger.info("=======================================================")
 
-async def run_niza_class_scraping(logger, context_tag="[Scraping]"):
+async def run_niza_class_scraping(page, logger, context_tag="[Scraping]"):
     """Executes scraping for all Niza classes (1-44)."""
 
     try:
@@ -199,7 +196,7 @@ async def run_niza_class_scraping(logger, context_tag="[Scraping]"):
             logger.info(f"File '{output_filename}' already exists. Skipping Niza class {niza_class}.")
         else:
             logger.info(f"=== Scraping Niza Class ({'ACTIVE'}): {niza_class} ===")
-            await scrape_by_niza_class(niza_class, logger, headless=True)
+            await scrape_by_niza_class(page, niza_class, logger)
 
     try:
         rollbar.report_message(f"{context_tag} Scraping por Niza class finalizado con éxito", "info")

@@ -5,6 +5,7 @@ import os
 import rollbar
 import multiprocessing
 from dotenv import load_dotenv
+from playwright.async_api import async_playwright
 from src.functions.scraping_functions import (
     run_niza_class_scraping, 
     run_scraping_historical_part, 
@@ -15,27 +16,33 @@ from src.utils.constants import PATHS
 from src.utils.logging_config import setup_logging
 
 
-# --- Funciones Worker para Multiprocessing ---
-
 def _scrape_worker_1(case_status):
     """
     Worker Proceso 1: Ejecuta Niza + Scraping Histórico (1900-2014).
     """
     logger = setup_logging()
     logger.info("--- [Proceso 1] INICIANDO (Niza + Fechas Históricas) ---")
-    try:
-        async def worker_1_main_tasks():
-            # 1. Tarea Niza
-            logger.info("--- [Proceso 1] Iniciando scraping Clases Niza... ---")
-            await run_niza_class_scraping(logger, context_tag="[Worker-1]")
-            logger.info("--- [Proceso 1] Scraping Clases Niza FINALIZADO. ---")
+    
+    async def worker_1_main_tasks():
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            logger.info("--- [Proceso 1] Navegador Chromium iniciado. ---")
             
-            # 2. Tarea Fechas Históricas
-            logger.info("--- [Proceso 1] Iniciando scraping Fechas Históricas... ---")
-            await run_scraping_historical_part(logger, case_status, context_tag="[Worker-1]")
-            logger.info("--- [Proceso 1] Scraping Fechas Históricas FINALIZADO. ---")
-        
-        # Ejecuta las tareas async de este worker
+            try:
+                logger.info("--- [Proceso 1] Iniciando scraping Clases Niza... ---")
+                await run_niza_class_scraping(page, logger, context_tag="[Worker-1]")
+                logger.info("--- [Proceso 1] Scraping Clases Niza FINALIZADO. ---")
+                
+                logger.info("--- [Proceso 1] Iniciando scraping Fechas Históricas... ---")
+                await run_scraping_historical_part(page, logger, case_status, context_tag="[Worker-1]")
+                logger.info("--- [Proceso 1] Scraping Fechas Históricas FINALIZADO. ---")
+            
+            finally:
+                await browser.close()
+                logger.info("--- [Proceso 1] Navegador Chromium cerrado. ---")
+
+    try:
         asyncio.run(worker_1_main_tasks())
         logger.info("--- [Proceso 1] FINALIZADO (Niza + Fechas Históricas) ---")
         
@@ -48,16 +55,25 @@ def _scrape_worker_1(case_status):
 
 def _scrape_worker_2(case_status):
     """
-    Worker Proceso 2: Ejecuta Scraping Reciente (2014-Presente).
+    Worker Proceso 2: Ejecuta Scraping Reciente (2019-Presente).
     """
-    logger = setup_logging() # Inicializa el logger en este nuevo proceso
+    logger = setup_logging()
     logger.info(f"--- [Proceso 2] INICIANDO (Fechas Recientes, Status: {case_status}) ---")
-    try:
-        async def worker_2_main_task():
-            # 1. Tarea Fechas Recientes
-            await run_scraping_recent_part(logger, case_status, context_tag="[Worker-2]")
+    
+    async def worker_2_main_task():
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            logger.info("--- [Proceso 2] Navegador Chromium iniciado. ---")
 
-        # Ejecuta la tarea async de este worker
+            try:
+                await run_scraping_recent_part(page, logger, case_status, context_tag="[Worker-2]")
+            
+            finally:
+                await browser.close()
+                logger.info("--- [Proceso 2] Navegador Chromium cerrado. ---")
+
+    try:
         asyncio.run(worker_2_main_task())
         logger.info("--- [Proceso 2] FINALIZADO (Fechas Recientes) ---")
         
@@ -68,7 +84,6 @@ def _scrape_worker_2(case_status):
         except Exception as re:
             logger.error(f"No se pudo reportar excepción de Proceso 2 a Rollbar: {re}")
 
-# --- Orquestador Principal (Modificado) ---
 
 def run_sync_process(logger, case_status):
     """
@@ -90,10 +105,8 @@ def run_sync_process(logger, case_status):
         except Exception as e:
             logger.warning(f"No se pudo reportar mensaje a Rollbar: {e}")
 
-        # --- 1. Ejecutar Scraping en Paralelo ---
         logger.info("Iniciando procesos de scraping en paralelo (divididos)...")
         
-        # Pasa case_status a ambos workers
         process1 = multiprocessing.Process(
             target=_scrape_worker_1,
             args=(case_status,),
@@ -117,14 +130,10 @@ def run_sync_process(logger, case_status):
 
         logger.info("Ambos procesos de scraping han terminado.")
 
-        # --- 2. Ejecutar ETL Principal ---
-        # (Como solicitaste: después de scrapear, actualizar la BD)
         logger.info("Iniciando proceso ETL principal (actualización de BD)...")
         run_full_etl_process(logger)
         logger.info("Proceso ETL principal finalizado.")
 
-        # --- 3. Ejecutar Verificación y Corrección ---
-        # (Como solicitaste: *después* de la actualización principal de la BD)
         logger.info("Iniciando proceso de verificación y corrección...")
         
         async def verification_task():

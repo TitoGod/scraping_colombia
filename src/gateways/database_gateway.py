@@ -3,6 +3,7 @@ import pandas as pd
 import psycopg2
 import psycopg2.extras
 from datetime import datetime
+import rollbar
 
 class DatabaseManager:
     """Class to manage all interactions with the PostgreSQL database."""
@@ -29,6 +30,7 @@ class DatabaseManager:
                 return results
         except Exception as e:
             self.logger.critical(f"CRITICAL error fetching active 'request_numbers': {e}")
+            rollbar.report_exc_info()
             return set()
         finally:
             if conn: conn.close()
@@ -57,11 +59,11 @@ class DatabaseManager:
                 self.logger.info(f"Successfully completed update of {len(data_tuples)} statuses.")
         except Exception as e:
             self.logger.error(f"Error updating statuses in the database: {e}")
+            rollbar.report_exc_info()
             if conn: conn.rollback()
         finally:
             if conn: conn.close()
 
-    #[--- NUEVA FUNCIÓN ---]
     def fetch_records_by_request_numbers(self, request_numbers_list):
         """Busca en la BD solo los registros que coinciden con la lista de request_numbers."""
         if not request_numbers_list:
@@ -74,8 +76,6 @@ class DatabaseManager:
         conn = None
         try:
             conn = psycopg2.connect(**self.db_params)
-            # Usamos ANY(ARRAY[...]) para una búsqueda eficiente en la lista
-            # psycopg2 manejará la conversión de la lista de Python
             query = f"SELECT {columns_str} FROM {self.table_name} WHERE badger_country = 'COLOMBIA' AND request_number = ANY(%s);"
             
             df = pd.read_sql_query(query, conn, params=(request_numbers_list,))
@@ -83,12 +83,12 @@ class DatabaseManager:
             return df
         except Exception as e:
             self.logger.error(f"Error buscando registros por lista: {e}", exc_info=True)
+            rollbar.report_exc_info()
             return pd.DataFrame()
         finally:
             if conn: conn.close()
 
     def fetch_all_records(self):
-        #[--- COMENTARIO MODIFICADO ---]
         """
         ¡ADVERTENCIA! Esta función puede causar OOM (Out-of-Memory) si la tabla es muy grande.
         Usar 'fetch_records_by_request_numbers' en su lugar para ETL en lotes.
@@ -105,6 +105,7 @@ class DatabaseManager:
             return df
         except Exception as e:
             self.logger.critical(f"CRITICAL error connecting to or fetching data from the database: {e}")
+            rollbar.report_exc_info()
             return pd.DataFrame()
         finally:
             if conn: conn.close()
@@ -128,6 +129,7 @@ class DatabaseManager:
                 self.logger.info("Insertion completed successfully.")
         except Exception as e:
             self.logger.error(f"Error inserting into the database: {e}")
+            rollbar.report_exc_info()
             if conn: conn.rollback()
         finally:
             if conn: conn.close()
@@ -154,6 +156,7 @@ class DatabaseManager:
                 self.logger.info("Update completed successfully.")
         except Exception as e:
             self.logger.error(f"Error updating the database: {e}")
+            rollbar.report_exc_info()
             if conn: conn.rollback()
         finally:
             if conn: conn.close()

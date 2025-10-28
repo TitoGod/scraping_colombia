@@ -7,7 +7,7 @@ import random
 import rollbar
 from datetime import datetime
 import pandas as pd
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeoutError
 from src.utils.constants import PATHS
 
 DOWNLOADS_PATH = PATHS["tmp_path"]
@@ -155,7 +155,7 @@ async def extract_all_pages_data(page, logger):
             
     return all_cases
 
-async def scrape_by_date_range(start_date, end_date, case_state, logger, headless=True, global_retries=3):
+async def scrape_by_date_range(page: Page, start_date, end_date, case_state, logger, global_retries=3):
     start_safe, end_safe, global_attempt = start_date.replace("/", "_"), end_date.replace("/", "_"), 0
     normalized_state = (case_state or 'inactive').strip().lower()
     if normalized_state not in ('active', 'inactive'):
@@ -169,83 +169,76 @@ async def scrape_by_date_range(start_date, end_date, case_state, logger, headles
     while global_attempt < global_retries:
         global_attempt += 1
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=headless, downloads_path=DOWNLOADS_PATH)
-                context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117 Safari/537.36", viewport={"width": 1280, "height": 900})
-                page = await context.new_page()
-                page.set_default_timeout(120000)
+            page.set_default_timeout(120000)
+            
+            await page.goto("https://sipi.sic.gov.co/sipi/Extra/Default.aspx", wait_until='networkidle')
+            await click_with_retry(page, '#MainContent_lnkTMSearch')
+            await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkAdvanceSearch')
+            await page.wait_for_selector("#MainContent_ctrlTMSearch_txtCalCreationDateStart", state='visible')
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSearch")
+            await wait_hidden_overlay(page)
+            
+            state_selector = f"#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_rbtnlLive_{state_index}"
+            logger.info(f"Selecting state: {normalized_state}")
+            await page.wait_for_selector(state_selector, state='visible', timeout=20000)
+            await click_with_retry(page, state_selector)
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_lnkbtnSearch > span.ui-button-text")
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_ctrlCaseStatusList_gvCaseStatuss > tbody > tr.gridview_pager.alt1 > td > div:nth-child(1) > a:nth-child(1)")
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSelect > span.ui-button-text")
+            
+            await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateStart').value = '{start_date}';")
+            await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateEnd').value = '{end_date}';")
+            await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkbtnSearch > span.ui-button-text')
+            
+            found = await wait_for_any(page, [{'selector': "#MainContent_ctrlTMSearch_ctrlProcList_hdrNbItems"}, {'selector': "#MainContent_ctrlTM_panelCaseData"}], timeout=30000)
+            if not found:
+                if await page.locator("#MainContent_ctrlTMSearch_divHelp").is_visible():
+                        logger.info(f"No results found for the range {start_date} - {end_date}.")
+                        return
+                raise RuntimeError("The results page did not load.")
                 
-                await page.goto("https://sipi.sic.gov.co/sipi/Extra/Default.aspx", wait_until='networkidle')
-                await click_with_retry(page, '#MainContent_lnkTMSearch')
-                await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkAdvanceSearch')
-                await page.wait_for_selector("#MainContent_ctrlTMSearch_txtCalCreationDateStart", state='visible')
-                await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSearch")
-                await wait_hidden_overlay(page)
-                
-                state_selector = f"#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_rbtnlLive_{state_index}"
-                logger.info(f"Selecting state: {normalized_state}")
-                await page.wait_for_selector(state_selector, state='visible', timeout=20000)
-                await click_with_retry(page, state_selector)
-                await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_lnkbtnSearch > span.ui-button-text")
-                await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_ctrlCaseStatusList_gvCaseStatuss > tbody > tr.gridview_pager.alt1 > td > div:nth-child(1) > a:nth-child(1)")
-                await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSelect > span.ui-button-text")
-                
-                await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateStart').value = '{start_date}';")
-                await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateEnd').value = '{end_date}';")
-                await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkbtnSearch > span.ui-button-text')
-                
-                found = await wait_for_any(page, [{'selector': "#MainContent_ctrlTMSearch_ctrlProcList_hdrNbItems"}, {'selector': "#MainContent_ctrlTM_panelCaseData"}], timeout=30000)
-                if not found:
-                    if await page.locator("#MainContent_ctrlTMSearch_divHelp").is_visible():
-                         logger.info(f"No results found for the range {start_date} - {end_date}.")
-                         await browser.close()
-                         return
-                    raise RuntimeError("The results page did not load.")
-                    
-                if "2000" in (await try_get_text(page, "#MainContent_ctrlTMSearch_ctrlProcList_hdrNbItems") or ""):
-                    logger.warning(f"SKIPPED RANGE: The range {start_date} - {end_date} exceeded the 2000 trademark limit and will not be processed.")
-                    await browser.close()
-                    return
-                    
-                try:
-                    pager_selector = "#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases tr.gridview_pager"
-                    if await page.locator(pager_selector).count() > 0:
-                        logger.info("Configuring results view...")
-                        column_dropdown = page.locator(f"{pager_selector} select.no-print")
-                        if await column_dropdown.count() > 0:
-                            logger.info(" -> Showing 'Filing Date' column...")
-                            await column_dropdown.select_option(label="Mostrar : Fecha de radicación")
-                            await page.wait_for_load_state('networkidle', timeout=60000)
-                            
-                        results_per_page_dropdown = page.locator(f"{pager_selector} select:not(.no-print)")
-                        if await results_per_page_dropdown.count() > 0:
-                            logger.info(" -> Changing to 200 results per page...")
-                            await results_per_page_dropdown.select_option(value="200")
-                            await page.wait_for_load_state('networkidle', timeout=60000)
-                except Exception as e:
-                    logger.warning(f"An error occurred while configuring the results view. Continuing. Error: {e}")
-                    
-                list_cases = await extract_all_pages_data(page, logger)
-                with open(output_filename, 'w', encoding='utf-8') as json_file:
-                    json.dump(list_cases, json_file, ensure_ascii=False, indent=4)
-                logger.info(f"SUCCESS: Saved {len(list_cases)} records ({output_tag}) for the range {start_date} - {end_date}.")
-
-                # Pausa aleatoria entre 5 y 15 segundos antes de la siguiente iteración
-                pause_time = random.randint(5, 15)
-                logger.info(f"Pausa de {pause_time} segundos para simular comportamiento humano.")
-                await asyncio.sleep(pause_time) 
-                                                       
-                await browser.close()
+            if "2000" in (await try_get_text(page, "#MainContent_ctrlTMSearch_ctrlProcList_hdrNbItems") or ""):
+                logger.warning(f"SKIPPED RANGE: The range {start_date} - {end_date} exceeded the 2000 trademark limit and will not be processed.")
                 return
                 
+            try:
+                pager_selector = "#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases tr.gridview_pager"
+                if await page.locator(pager_selector).count() > 0:
+                    logger.info("Configuring results view...")
+                    column_dropdown = page.locator(f"{pager_selector} select.no-print")
+                    if await column_dropdown.count() > 0:
+                        logger.info(" -> Showing 'Filing Date' column...")
+                        await column_dropdown.select_option(label="Mostrar : Fecha de radicación")
+                        await page.wait_for_load_state('networkidle', timeout=60000)
+                        
+                    results_per_page_dropdown = page.locator(f"{pager_selector} select:not(.no-print)")
+                    if await results_per_page_dropdown.count() > 0:
+                        logger.info(" -> Changing to 200 results per page...")
+                        await results_per_page_dropdown.select_option(value="200")
+                        await page.wait_for_load_state('networkidle', timeout=60000)
+            except Exception as e:
+                logger.warning(f"An error occurred while configuring the results view. Continuing. Error: {e}")
+                
+            list_cases = await extract_all_pages_data(page, logger)
+            with open(output_filename, 'w', encoding='utf-8') as json_file:
+                json.dump(list_cases, json_file, ensure_ascii=False, indent=4)
+            logger.info(f"SUCCESS: Saved {len(list_cases)} records ({output_tag}) for the range {start_date} - {end_date}.")
+
+            pause_time = random.randint(5, 15)
+            logger.info(f"Pausa de {pause_time} segundos para simular comportamiento humano.")
+            await asyncio.sleep(pause_time) 
+                                                    
+            return
+            
         except Exception as e:
             logger.error(f"[scrape_by_date_range] Attempt {global_attempt}/{global_retries} failed for {start_date} - {end_date}: {e}", exc_info=True)
+            rollbar.report_exc_info()
             if global_attempt >= global_retries:
                 logger.critical(f"{start_date} - {end_date} -> Failed after {global_retries} attempts.")
                 return
             await asyncio.sleep(2 ** global_attempt + random.random())
 
-async def scrape_by_niza_class(niza_class, logger, headless=True, global_retries=3):
+async def scrape_by_niza_class(page: Page, niza_class, logger, global_retries=3):
     start, end, case_state = "01/01/1900", "01/01/1900", 'active'
     output_filename = f'{DOWNLOADS_PATH}niza_{niza_class}_1900_1900_ACTIVE.json'
     global_attempt, state_index = 0, '0'
@@ -253,74 +246,68 @@ async def scrape_by_niza_class(niza_class, logger, headless=True, global_retries
     while global_attempt < global_retries:
         global_attempt += 1
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=headless, downloads_path=DOWNLOADS_PATH)
-                context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117 Safari/537.36", viewport={"width": 1280, "height": 900})
-                page = await context.new_page()
-                page.set_default_timeout(120000)
+            page.set_default_timeout(120000)
 
-                await page.goto("https://sipi.sic.gov.co/sipi/Extra/Default.aspx", wait_until='networkidle')
-                await click_with_retry(page, '#MainContent_lnkTMSearch')
-                await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkAdvanceSearch')
-                await page.wait_for_selector("#MainContent_ctrlTMSearch_txtCalCreationDateStart", state='visible')
-                await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSearch")
-                await wait_hidden_overlay(page)
+            await page.goto("https://sipi.sic.gov.co/sipi/Extra/Default.aspx", wait_until='networkidle')
+            await click_with_retry(page, '#MainContent_lnkTMSearch')
+            await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkAdvanceSearch')
+            await page.wait_for_selector("#MainContent_ctrlTMSearch_txtCalCreationDateStart", state='visible')
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSearch")
+            await wait_hidden_overlay(page)
+            
+            state_selector = f"#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_rbtnlLive_{state_index}"
+            logger.info(f"Selecting state: {case_state}")
+            await page.wait_for_selector(state_selector, state='visible', timeout=20000)
+            await click_with_retry(page, state_selector)
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_lnkbtnSearch > span.ui-button-text")
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_ctrlCaseStatusList_gvCaseStatuss > tbody > tr.gridview_pager.alt1 > td > div:nth-child(1) > a:nth-child(1)")
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSelect > span.ui-button-text")
+            
+            logger.info(f"Filtering by Niza Class: {niza_class}")
+            await page.fill("#MainContent_ctrlTMSearch_txtNiceClassification", str(niza_class))
+            await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateStart').value = '{start}';")
+            await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateEnd').value = '{end}';")
+            await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkbtnSearch > span.ui-button-text')
+            
+            found = await wait_for_any(page, [{'selector': "#MainContent_ctrlTMSearch_ctrlProcList_hdrNbItems"}, {'selector': "#MainContent_ctrlTM_panelCaseData"}], timeout=30000)
+            if not found:
+                if await page.locator("#MainContent_ctrlTMSearch_divHelp").is_visible():
+                        logger.info(f"No results found for Niza class {niza_class}.")
+                        with open(output_filename, 'w', encoding='utf-8') as json_file: json.dump([], json_file)
+                        return
+                raise RuntimeError("The results page did not load.")
                 
-                state_selector = f"#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_rbtnlLive_{state_index}"
-                logger.info(f"Selecting state: {case_state}")
-                await page.wait_for_selector(state_selector, state='visible', timeout=20000)
-                await click_with_retry(page, state_selector)
-                await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_lnkbtnSearch > span.ui-button-text")
-                await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_ctrlCaseStatusList_gvCaseStatuss > tbody > tr.gridview_pager.alt1 > td > div:nth-child(1) > a:nth-child(1)")
-                await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSelect > span.ui-button-text")
-                
-                logger.info(f"Filtering by Niza Class: {niza_class}")
-                await page.fill("#MainContent_ctrlTMSearch_txtNiceClassification", str(niza_class))
-                await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateStart').value = '{start}';")
-                await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateEnd').value = '{end}';")
-                await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkbtnSearch > span.ui-button-text')
-                
-                found = await wait_for_any(page, [{'selector': "#MainContent_ctrlTMSearch_ctrlProcList_hdrNbItems"}, {'selector': "#MainContent_ctrlTM_panelCaseData"}], timeout=30000)
-                if not found:
-                    if await page.locator("#MainContent_ctrlTMSearch_divHelp").is_visible():
-                         logger.info(f"No results found for Niza class {niza_class}.")
-                         with open(output_filename, 'w', encoding='utf-8') as json_file: json.dump([], json_file)
-                         await browser.close()
-                         return
-                    raise RuntimeError("The results page did not load.")
-                    
-                if "2000" in (await try_get_text(page, "#MainContent_ctrlTMSearch_ctrlProcList_hdrNbItems") or ""):
-                    logger.warning(f"SKIPPED RANGE: Niza class {niza_class} exceeded the 2000 trademark limit.")
-                    await browser.close()
-                    return
-
-                try:
-                    pager_selector = "#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases tr.gridview_pager"
-                    if await page.locator(pager_selector).count() > 0:
-                        logger.info("Configuring results view...")
-                        column_dropdown = page.locator(f"{pager_selector} select.no-print")
-                        if await column_dropdown.count() > 0:
-                            logger.info(" -> Showing 'Filing Date' column...")
-                            await column_dropdown.select_option(label="Mostrar : Fecha de radicación")
-                            await page.wait_for_load_state('networkidle', timeout=60000)
-                            
-                        results_per_page_dropdown = page.locator(f"{pager_selector} select:not(.no-print)")
-                        if await results_per_page_dropdown.count() > 0:
-                            logger.info(" -> Changing to 200 results per page...")
-                            await results_per_page_dropdown.select_option(value="200")
-                            await page.wait_for_load_state('networkidle', timeout=60000)
-                except Exception as e:
-                    logger.warning(f"An error occurred while configuring the results view. Continuing. Error: {e}")
-                    
-                list_cases = await extract_all_pages_data(page, logger)
-                with open(output_filename, 'w', encoding='utf-8') as json_file:
-                    json.dump(list_cases, json_file, ensure_ascii=False, indent=4)
-                logger.info(f"SUCCESS: Saved {len(list_cases)} records for Niza class {niza_class}.")
-                await browser.close()
+            if "2000" in (await try_get_text(page, "#MainContent_ctrlTMSearch_ctrlProcList_hdrNbItems") or ""):
+                logger.warning(f"SKIPPED RANGE: Niza class {niza_class} exceeded the 2000 trademark limit.")
                 return
+
+            try:
+                pager_selector = "#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases tr.gridview_pager"
+                if await page.locator(pager_selector).count() > 0:
+                    logger.info("Configuring results view...")
+                    column_dropdown = page.locator(f"{pager_selector} select.no-print")
+                    if await column_dropdown.count() > 0:
+                        logger.info(" -> Showing 'Filing Date' column...")
+                        await column_dropdown.select_option(label="Mostrar : Fecha de radicación")
+                        await page.wait_for_load_state('networkidle', timeout=60000)
+                        
+                    results_per_page_dropdown = page.locator(f"{pager_selector} select:not(.no-print)")
+                    if await results_per_page_dropdown.count() > 0:
+                        logger.info(" -> Changing to 200 results per page...")
+                        await results_per_page_dropdown.select_option(value="200")
+                        await page.wait_for_load_state('networkidle', timeout=60000)
+            except Exception as e:
+                logger.warning(f"An error occurred while configuring the results view. Continuing. Error: {e}")
                 
+            list_cases = await extract_all_pages_data(page, logger)
+            with open(output_filename, 'w', encoding='utf-8') as json_file:
+                json.dump(list_cases, json_file, ensure_ascii=False, indent=4)
+            logger.info(f"SUCCESS: Saved {len(list_cases)} records for Niza class {niza_class}.")
+            return
+            
         except Exception as e:
             logger.error(f"[scrape_by_niza_class] Attempt {global_attempt}/{global_retries} failed for Niza {niza_class}: {e}", exc_info=True)
+            rollbar.report_exc_info()
             if global_attempt >= global_retries:
                 logger.critical(f"Niza {niza_class} -> Failed after {global_retries} attempts.")
                 return
@@ -377,6 +364,7 @@ async def scrape_request_by_number(page, request_number, logger):
         return "", "Status not found on results page."
     except Exception as e:
         logger.error(f"Fatal error during scraping of {request_number}: {e}", exc_info=True)
+        rollbar.report_exc_info()
         return "", str(e)
 
 async def run_scraping_for_missing_requests(csv_path, logger):
@@ -390,6 +378,7 @@ async def run_scraping_for_missing_requests(csv_path, logger):
         requests_to_process = df['missing_request_number'].dropna().tolist()
     except FileNotFoundError:
         logger.error(f"The CSV file '{csv_path}' was not found.")
+        rollbar.report_exc_info()
         return None
     
     if not requests_to_process:

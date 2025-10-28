@@ -13,8 +13,6 @@ from src.gateways.s3_gateway import S3Manager
 
 JSON_FOLDER_PATH = PATHS["tmp_path"]
 
-#[--- MODIFICADO ---]
-#[--- Esta función ha sido refactorizada para procesar en lotes (un JSON a la vez) ---]
 def run_full_etl_process(logger):
     """Orquesta el proceso ETL completo, procesando los JSON en lotes (uno por uno)."""
     try:
@@ -37,7 +35,6 @@ def run_full_etl_process(logger):
         normalizer = DataNormalizer(raw_data_folder=JSON_FOLDER_PATH, logger=logger)
         db_manager = DatabaseManager(db_params, table_name, logger=logger)
         
-        # 1. Obtener la lista de archivos a procesar (sin cargarlos)
         json_file_list = normalizer.get_json_file_list()
         if not json_file_list:
             logger.warning(f"No se encontraron archivos JSON en '{JSON_FOLDER_PATH}'. Terminando ETL.")
@@ -47,14 +44,11 @@ def run_full_etl_process(logger):
         total_updates = 0
         report_data_global = []
         
-        # Variable para almacenar columnas de la DB, se obtiene una sola vez si es necesario
         db_cols_list = None
 
-        # 2. Iterar sobre cada archivo JSON (procesamiento en lotes)
         for i, file_path in enumerate(json_file_list):
             logger.info(f"--- Procesando Lote {i+1}/{len(json_file_list)}: {os.path.basename(file_path)} ---")
             
-            # 3. Normalizar solo el archivo actual (uso bajo de RAM)
             new_data = normalizer.normalize_single_file(file_path)
             if not new_data:
                 logger.warning(f"El archivo {file_path} no produjo datos. Omitiendo lote.")
@@ -64,34 +58,29 @@ def run_full_etl_process(logger):
             df_new.drop_duplicates(subset=['request_number'], keep='first', inplace=True)
             df_new.set_index("request_number", inplace=True)
             
-            # 4. Traer de la DB SOLO los registros de este lote (uso bajo de RAM)
             request_numbers_in_lote = df_new.index.tolist()
             df_db = db_manager.fetch_records_by_request_numbers(request_numbers_in_lote)
             if not df_db.empty:
                 df_db.drop_duplicates(subset=['request_number'], keep='first', inplace=True)
                 df_db.set_index("request_number", inplace=True)
 
-            # 5. Estandarizar fechas (solo para este lote)
             for df in [df_new, df_db]:
                 for col in ['filing_date', 'expiration_date']:
                     if col in df.columns:
                         df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
 
-            # 6. Comparar y clasificar (solo para este lote)
             logger.info("Comparando y clasificando registros del lote...")
             report_data_lote, records_to_insert_indices, records_to_update_indices = [], [], []
-            # Usamos el índice de df_new ya que es el único que importa para este lote
             all_request_numbers_lote = df_new.index
             
             for req_num in all_request_numbers_lote:
                 changed, columns_changed = False, []
-                # El registro siempre está 'in_new' (ya que iteramos sobre df_new)
                 in_db = not df_db.empty and req_num in df_db.index
                 
                 if not in_db:
                     columns_changed.append("NEW_RECORD")
                     records_to_insert_indices.append(req_num)
-                else: # Registro existe, comparar
+                else:
                     new_row, db_row = df_new.loc[req_num], df_db.loc[req_num]
                     common_columns = df_new.columns.intersection(df_db.columns)
                     for col in common_columns:
@@ -110,7 +99,6 @@ def run_full_etl_process(logger):
             total_inserts += len(records_to_insert_indices)
             total_updates += len(records_to_update_indices)
             
-            # 7. Insertar en la DB (solo este lote)
             df_to_insert = df_new.loc[records_to_insert_indices].copy()
             if not df_to_insert.empty:
                 df_to_insert['id'] = [str(uuid.uuid4()) for _ in range(len(df_to_insert))]
@@ -121,20 +109,16 @@ def run_full_etl_process(logger):
                     if col in df_to_insert.columns: df_to_insert.loc[df_to_insert[col] == '', col] = None
                 db_manager.insert_records(df_to_insert)
             
-            # 8. Actualizar en la DB (solo este lote)
             df_to_update = df_new.loc[records_to_update_indices].copy().reset_index()
             if not df_to_update.empty:
                 for col in ['filing_date', 'expiration_date']:
                     if col in df_to_update.columns: df_to_update.loc[df_to_update[col] == '', col] = None
                 
-                # Obtenemos la lista de columnas de la DB si aún no la tenemos
                 if db_cols_list is None:
                     logger.info("Obteniendo lista de columnas de la DB por primera vez...")
-                    # Usamos df_db si está disponible, si no, hacemos una consulta vacía (o casi vacía)
                     if not df_db.empty:
                         db_cols_list = df_db.columns.tolist()
                     else:
-                        # Hacemos una consulta con un ID que probablemente no exista para solo obtener columnas
                         temp_df = db_manager.fetch_records_by_request_numbers(["-1"])
                         db_cols_list = temp_df.columns.tolist()
 
@@ -143,7 +127,6 @@ def run_full_etl_process(logger):
             
             logger.info(f"--- Lote {i+1} procesado y guardado en la DB. ---")
 
-        # 9. Generar reporte CSV (Global) y subir a S3
         logger.info("Todos los lotes procesados. Generando reporte CSV global...")
         csv_report_path = f"change_report_{datetime.now().strftime('%Y-%m-%d')}.csv"
         pd.DataFrame(report_data_global).to_csv(csv_report_path, index=False, encoding="utf-8")
@@ -154,8 +137,8 @@ def run_full_etl_process(logger):
             s3_manager.upload_file(csv_report_path, S3_PATHS["reports_folder"])
         except Exception as e:
             logger.error(f"Fallo al subir reporte CSV a S3: {e}")
+            rollbar.report_exc_info()
 
-        # 10. Reportar a Rollbar (Global)
         try:
             rollbar.report_message(
                 f"ETL: Base de datos actualizada ({total_inserts} nuevos, {total_updates} modificados) - PROCESADO EN LOTES",
@@ -243,6 +226,7 @@ def update_statuses_from_json(json_path, logger):
         return
     except json.JSONDecodeError:
         logger.error(f"Error decoding the results JSON '{json_path}'.")
+        rollbar.report_exc_info()
         return
     
     status_mapping = {

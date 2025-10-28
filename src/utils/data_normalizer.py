@@ -2,6 +2,7 @@ import os
 import json
 import re
 from datetime import datetime
+import rollbar
 
 class DataNormalizer:
     """Class responsible for processing and normalizing JSON files."""
@@ -50,10 +51,10 @@ class DataNormalizer:
                                 request_numbers.add(entry['request_number'])
                 except (json.JSONDecodeError, TypeError):
                     self.logger.error(f"Error reading or processing JSON file: '{file_path}'. It will be skipped.")
+                    rollbar.report_exc_info()
         self.logger.info(f"Found {len(request_numbers)} unique 'request_number' values in JSON files.")
         return request_numbers
 
-    #[--- NUEVA FUNCIÓN ---]
     def get_json_file_list(self):
         """Devuelve una lista de todas las rutas de archivos JSON válidos."""
         json_files = []
@@ -65,7 +66,6 @@ class DataNormalizer:
         self.logger.info(f"Se encontraron {len(json_files)} archivos JSON para procesar en lotes.")
         return json_files
 
-    #[--- NUEVA FUNCIÓN ---]
     def normalize_single_file(self, file_path):
         """Lee un solo archivo JSON, lo normaliza y lo devuelve."""
         try:
@@ -73,9 +73,9 @@ class DataNormalizer:
                 data = json.load(f)
         except Exception as e:
             self.logger.error(f"Error al leer el archivo JSON {file_path}: {e}. Omitiendo.")
+            rollbar.report_exc_info()
             return []
         
-        # Asegurarse de que 'data' sea siempre una lista para iterar
         if not isinstance(data, list):
             data = [data]
 
@@ -107,7 +107,6 @@ class DataNormalizer:
             
         return final_data
 
-    #[--- MODIFICADO ---]
     def combine_and_normalize_jsons(self):
         """
         Esta función ahora está OBSOLETA para el ETL principal si hay problemas de memoria.
@@ -125,12 +124,12 @@ class DataNormalizer:
                         combined_data.extend(data if isinstance(data, list) else [data])
                 except json.JSONDecodeError:
                     self.logger.error(f"Error decoding JSON file: '{file_path}'. It will be skipped.")
+                    rollbar.report_exc_info()
                 except Exception as e:
                     self.logger.error(f"Unexpected error reading '{file_path}': {e}. It will be skipped.")
 
         self.logger.info(f"Step 1: Merged a total of {len(combined_data)} records from the '{self.folder_path}' folder.")
         
-        # Reutilizamos la lógica de normalización de la nueva función
         normalized_data = self.normalize_single_file({"data": combined_data})
         
         self.logger.info(f"A total of {len(normalized_data)} records have been normalized.")
