@@ -26,7 +26,11 @@ def _scrape_worker_1(case_status):
     async def worker_1_main_tasks():
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117 Safari/537.36",
+                viewport={"width": 1280, "height": 900}
+            )
+            page = await context.new_page()
             logger.info("--- [Proceso 1] Navegador Chromium iniciado. ---")
             
             try:
@@ -63,7 +67,11 @@ def _scrape_worker_2(case_status):
     async def worker_2_main_task():
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117 Safari/537.36",
+                viewport={"width": 1280, "height": 900}
+            )
+            page = await context.new_page()
             logger.info("--- [Proceso 2] Navegador Chromium iniciado. ---")
 
             try:
