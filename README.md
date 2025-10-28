@@ -1,92 +1,144 @@
-# Proyecto de Sincronización de Marcas - Colombia
+# Sync Colombia Trademarks (Pipeline de ETL)
 
-Este proyecto es una aplicación robusta diseñada para automatizar la extracción, procesamiento y carga (ETL) de datos de marcas desde el portal SIPI de Colombia, manteniendo una base de datos PostgreSQL sincronizada.
+Este proyecto es un pipeline de ETL robusto diseñado para extraer, procesar y sincronizar datos de marcas registradas desde el portal SIPI (Superintendencia de Industria y Comercio) de Colombia.
 
-## ✨ Características Principales
+Utiliza scraping web para obtener los datos, los normaliza y los carga en una base de datos PostgreSQL, asegurando que la información local esté actualizada.
 
--   **Scraping Automatizado**: Extrae datos de marcas por Clases Niza y por rangos de fechas configurables.
--   **Proceso ETL Completo**: Normaliza los datos extraídos, los compara con la información existente en la base de datos y realiza inserciones o actualizaciones de forma inteligente.
--   **Verificación y Corrección**: Incluye un flujo para detectar registros activos en la base de datos que ya no se encuentran en la fuente, re-scrapearlos para obtener su estado actual y corregirlos.
--   **Arquitectura Profesional**: El código está organizado en una arquitectura de capas desacoplada (`gateways`, `functions`, `services`, `handlers`) para facilitar su mantenimiento, escalabilidad y testing.
--   **Ejecución por Línea de Comandos**: Utiliza `argparse` para una ejecución flexible y parametrizable, ideal para entornos de servidor como Lightsail.
+## 🚀 Características Principales
 
----
+  * **Scraping Paralelo:** Ejecuta tareas de scraping en paralelo usando `multiprocessing` para maximizar la eficiencia (un proceso para Clases Niza e históricos, otro para datos recientes).
+  * **ETL por Lotes:** Procesa los archivos JSON generados en lotes (uno por uno) para realizar la carga en la base de datos, evitando sobrecargas de memoria.
+  * **Auto-Corrección:** Incluye un flujo de verificación que identifica registros activos en la BD que faltan en los JSON (por fallos de scraping), los re-extrae individualmente por su número de solicitud y actualiza sus estados.
+  * **Reportes en S3:** Genera un reporte de cambios (`change_report.csv`) en cada ejecución y un reporte de registros faltantes (`missing_records.csv`) durante la corrección, y los sube automáticamente a un bucket de S3.
+  * **Monitoreo de Errores:** Integrado con Rollbar para el monitoreo de excepciones y mensajes de estado en tiempo real.
+  * **Simulación Humana:** Utiliza un `user_agent` y `viewport` específicos para simular un navegador real (Chrome en Windows) y evitar bloqueos por parte del sitio de SIPI.
 
-## 🏗️ Arquitectura del Proyecto
+## ⚙️ Flujo del Proceso
 
-El proyecto sigue un patrón de diseño inspirado en aplicaciones de contenedores, separando claramente las responsabilidades:
+El pipeline se ejecuta en el siguiente orden:
 
-```
-/
-├── src/
-│   ├── gateways/               # Capa de acceso a sistemas externos (BD, Web Scraper).
-│   ├── functions/              # Módulos con la lógica de negocio y orquestación.
-│   ├── handler/                # Punto de entrada del contenedor/script.
-│   ├── service/                # Capa delgada que valida y delega al orquestador.
-│   └── utils/                  # Utilidades reutilizables (logging, constantes).
-│
-├── trigger_local_execution.sh  # Script para facilitar la ejecución local.
-├── requirements.txt            # Dependencias del proyecto.
-└── .env                        # Archivo para variables de entorno (NO subir a Git).
-```
+1.  **Inicio:** El proceso se invoca desde `src/handler/sync_colombia_trademarks.py`, que recibe el argumento `--status` (`active` o `inactive`).
+2.  **Scraping Paralelo (`sync_orchestrator.py`):** Se lanzan dos procesos:
+      * **Worker 1:** Extrae datos por Clases Niza (1-45) y datos históricos (1900-2018).
+      * **Worker 2:** Extrae datos recientes (2019-Presente) con una granularidad más fina (semanal y diaria).
+      * Todos los resultados se guardan como archivos JSON en la carpeta temporal `tmp/`.
+3.  **ETL Principal (`etl_functions.py`):**
+      * Una vez que *ambos* workers de scraping terminan, el proceso principal lee los archivos JSON de `tmp/` en lotes.
+      * Normaliza los datos (formatea fechas, estados, titulares).
+      * Compara cada lote con la base de datos PostgreSQL, identificando registros nuevos y modificados.
+      * Realiza `INSERT` para registros nuevos y `UPDATE` para registros existentes que cambiaron.
+      * Genera y sube el `change_report.csv` a S3.
+4.  **Verificación y Corrección (`etl_functions.py`):**
+      * Compara todos los `request_number` de la BD (con estado activo) contra todos los `request_number` encontrados en los JSON.
+      * Si encuentra registros en la BD que no están en los JSON, genera `missing_records.csv` y lo sube a S3.
+      * Inicia un scraping secundario (`run_scraping_for_missing_requests`) que visita el sitio de SIPI y busca cada registro faltante por su número.
+      * Guarda los resultados de la corrección en un nuevo JSON y actualiza los estados en la BD.
+5.  **Limpieza:** Al finalizar todo el proceso, la carpeta `tmp/` y su contenido son eliminados.
 
--   **`handler`**: El punto de entrada principal. Su única función es recibir la petición y llamar al `service` correspondiente.
--   **`service`**: Valida los parámetros del evento y delega la ejecución a la función de orquestación principal.
--   **`functions`**: Contienen la lógica de negocio de alto nivel (ej: "ejecutar el scraping completo", "correr el proceso ETL").
--   **`gateways`**: Contienen la lógica de bajo nivel para interactuar directamente con sistemas externos (Playwright para la web, Psycopg2 para la base de datos).
+## 🛠️ Tecnologías Utilizadas
 
----
+  * Python
+  * Playwright (para scraping web asíncrono)
+  * Pandas (para manipulación de datos y generación de CSV)
+  * Psycopg2 (para conectividad con PostgreSQL)
+  * Boto3 (para conectividad con AWS S3)
+  * Rollbar (para monitoreo de errores)
+  * Multiprocessing (para paralelismo)
 
-## 🚀 Guía de Instalación y Configuración
+## 🔧 Configuración
 
-Sigue estos pasos para poner en marcha el proyecto en tu entorno local o en un servidor.
+### 1\. Prerrequisitos
 
-### 1. Prerrequisitos
+  * Python 3.8+
+  * Una base de datos PostgreSQL accesible.
+  * Credenciales de AWS (con permisos de escritura en S3).
+  * Un token de acceso de Rollbar.
 
--   Python 3.10 o superior.
--   Acceso a una base de datos PostgreSQL.
+### 2\. Instalación
 
-### 2. Instalar Dependencias
-
-```bash
-# Instala todas las librerías necesarias
-pip install -r requirements.txt
-
-# Playwright requiere un paso adicional para instalar los navegadores que controla
-playwright install
-```
-
----
-
-## ▶️ Cómo Ejecutar el Proyecto
-
-El proyecto está diseñado para ser ejecutado desde la línea de comandos, pasando los parámetros necesarios.
-
-### Ejecución Simplificada (Recomendado)
-
-Para facilitar la ejecución local, puedes usar el script `trigger_local_execution.sh`. Este script configura los parámetros y ejecuta el handler por ti.
-
-1.  **Dar permisos de ejecución al script (solo la primera vez):**
+1.  Clona este repositorio:
     ```bash
-    chmod +x trigger_local_execution.sh
+    git clone [URL_DEL_REPOSITORIO]
+    cd [NOMBRE_DEL_REPOSITORIO]
+    ```
+2.  (Recomendado) Crea y activa un entorno virtual:
+    ```bash
+    python -m venv venv
+    source venv/bin/activate  # En Windows: venv\Scripts\activate
+    ```
+3.  Instala las dependencias:
+    ```bash
+    pip install -r requirements.txt
+    ```
+4.  Instala los navegadores necesarios para Playwright:
+    ```bash
+    playwright install
     ```
 
-2.  **Ejecutar el proceso:**
-    ```bash
-    ./trigger_local_execution.sh
-    ```
-    Si deseas ejecutar el proceso para marcas inactivas, simplemente edita el script y cambia `"active"` por `"inactive"`.
+### 3\. Variables de Entorno
 
-### Ejecución Manual
+Crea un archivo `.env` en la raíz del proyecto. Este archivo es **crítico** para la configuración de la aplicación.
 
-También puedes ejecutar el script directamente y pasar los argumentos manualmente. Esto es especialmente útil en servidores o en scripts de automatización.
+```ini
+# --- Base de Datos (PostgreSQL) ---
+PG_USER="tu_usuario_db"
+PG_PASS="tu_contraseña_db"
+PG_HOST="tu_host_db"
+PG_PORT="5432"
+PG_DB="tu_nombre_db"
+TABLE="nombre_de_la_tabla_marcas"
+
+# --- Monitoreo (Rollbar) ---
+ROLLBAR_TOKEN="tu_token_de_rollbar"
+ENV_STAGE="development" # o "production"
+
+# --- AWS (S3) ---
+AWS_ACCESS_KEY_ID="tu_access_key_id"
+AWS_SECRET_ACCESS_KEY="tu_secret_access_key"
+AWS_REGION="tu_region_aws" # ej: "us-east-1"
+```
+
+## 🏃 Cómo Ejecutar
+
+El script principal es `src/handler/sync_colombia_trademarks.py`. Debe ejecutarse pasando el argumento `--status` para definir qué tipo de marcas se van a scrapear.
+
+**Para sincronizar marcas activas:**
 
 ```bash
-# Ejecutar para el estado "activo"
 python src/handler/sync_colombia_trademarks.py --status active
+```
 
-# Ejecutar para el estado "inactivo"
+**Para sincronizar marcas inactivas:**
+
+```bash
 python src/handler/sync_colombia_trademarks.py --status inactive
 ```
 
-Todos los logs de la ejecución se guardarán en el archivo `etl_process_en.log` en la raíz del proyecto.
+## 📁 Estructura del Proyecto
+
+```
+.
+├── src/
+│   ├── functions/        # Lógica de negocio principal
+│   │   ├── etl_functions.py
+│   │   ├── scraping_functions.py
+│   │   └── sync_orchestrator.py
+│   ├── gateways/         # Módulos para interactuar con servicios externos
+│   │   ├── database_gateway.py
+│   │   ├── s3_gateway.py
+│   │   └── scraping_gateway.py
+│   ├── handler/          # Punto de entrada de la aplicación
+│   │   └── sync_colombia_trademarks.py
+│   ├── middlewares/      # Configuraciones de middlewares
+│   │   └── rollbar_config.py
+│   ├── services/         # Lógica del handler
+│   │   └── sync_colombia_trademarks/
+│   │       └── main.py
+│   └── utils/            # Utilidades, constantes y normalización
+│       ├── constants.py
+│       ├── data_normalizer.py
+│       └── logging_config.py
+├── .env                  # (Tú debes crearlo)
+├── etl_process_en.log    # (Generado en ejecución)
+└── requirements.txt      # (Asegúrate de tenerlo)
+```
