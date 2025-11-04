@@ -34,9 +34,12 @@ def _scrape_worker_1(case_status):
             logger.info("--- [Proceso 1] Navegador Chromium iniciado. ---")
             
             try:
-                logger.info("--- [Proceso 1] Iniciando scraping Clases Niza... ---")
-                await run_niza_class_scraping(page, logger, context_tag="[Worker-1]")
-                logger.info("--- [Proceso 1] Scraping Clases Niza FINALIZADO. ---")
+                if case_status.strip().lower() == 'active':
+                    logger.info("--- [Proceso 1] Iniciando scraping Clases Niza (Solo para 'active')... ---")
+                    await run_niza_class_scraping(page, logger, context_tag="[Worker-1]")
+                    logger.info("--- [Proceso 1] Scraping Clases Niza FINALIZADO. ---")
+                else:
+                    logger.info(f"--- [Proceso 1] Omitiendo scraping Clases Niza (Status: {case_status}). ---")
                 
                 logger.info("--- [Proceso 1] Iniciando scraping Fechas Históricas... ---")
                 await run_scraping_historical_part(page, logger, case_status, context_tag="[Worker-1]")
@@ -142,13 +145,16 @@ def run_sync_process(logger, case_status):
         run_full_etl_process(logger)
         logger.info("Proceso ETL principal finalizado.")
 
-        logger.info("Iniciando proceso de verificación y corrección...")
-        
-        async def verification_task():
-            await run_verification_and_correction(logger)
+        if case_status.strip().lower() == 'active':
+            logger.info("Iniciando proceso de verificación y corrección (solo para 'active')...")
             
-        asyncio.run(verification_task())
-        logger.info("Proceso de verificación y corrección finalizado.")
+            async def verification_task():
+                await run_verification_and_correction(logger)
+                
+            asyncio.run(verification_task())
+            logger.info("Proceso de verificación y corrección finalizado.")
+        else:
+            logger.info(f"Omitiendo 'run_verification_and_correction' para status: '{case_status}'.")
 
         logger.info(f"Proceso de sync finalizado con ÉXITO para status: {case_status.upper()}")
         

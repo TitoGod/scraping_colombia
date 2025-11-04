@@ -3,10 +3,10 @@ import os
 import sys
 
 def use_rollbar(handler):
-    rollbar.init(
-        access_token=os.getenv("ROLLBAR_TOKEN"), 
-        environment=os.getenv("ENV_STAGE")
-    )
+    #rollbar.init(
+    #    access_token=os.getenv("ROLLBAR_TOKEN"), 
+    #    environment=os.getenv("ENV_STAGE")
+    #)
 
     def wrapper(*args, **kwargs):
         try:
