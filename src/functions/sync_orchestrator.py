@@ -38,18 +38,18 @@ async def run_async_sync_process(logger, case_status):
         logger.info("Iniciando proceso de scraping optimizado...")
         await run_full_scraping_process(logger, case_status)
 
-        logger.info("Iniciando proceso ETL principal (actualización de BD)...")
-        run_full_etl_process(logger)
-        logger.info("Proceso ETL principal finalizado.")
+        #logger.info("Iniciando proceso ETL principal (actualización de BD)...")
+        #run_full_etl_process(logger)
+        #logger.info("Proceso ETL principal finalizado.")
 
-        if case_status.strip().lower() == 'active':
-            logger.info("Iniciando proceso de verificación y corrección (solo para 'active')...")
-            await run_verification_and_correction(logger)
-            logger.info("Proceso de verificación y corrección finalizado.")
-        else:
-            logger.info(f"Omitiendo 'run_verification_and_correction' para status: '{case_status}'.")
+        #if case_status.strip().lower() == 'active':
+        #    logger.info("Iniciando proceso de verificación y corrección (solo para 'active')...")
+        #    await run_verification_and_correction(logger)
+        #    logger.info("Proceso de verificación y corrección finalizado.")
+        #else:
+        #    logger.info(f"Omitiendo 'run_verification_and_correction' para status: '{case_status}'.")
 
-        logger.info(f"Proceso de sync finalizado con ÉXITO para status: {case_status.upper()}")
+        #logger.info(f"Proceso de sync finalizado con ÉXITO para status: {case_status.upper()}")
         
         try:
             rollbar.report_message(
