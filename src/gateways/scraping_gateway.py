@@ -9,9 +9,54 @@ from datetime import datetime
 import pandas as pd
 from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeoutError
 from src.utils.constants import PATHS
+from src.gateways.browser_manager import browser_manager
 
 DOWNLOADS_PATH = PATHS["tmp_path"]
 
+class NavigationState:
+    """Mantiene el estado de navegación para reutilizar sesiones"""
+    
+    def __init__(self):
+        self.is_prepared = False
+        self.current_page = None
+        
+    async def prepare_search_page(self, page, case_state, logger):
+        """Prepara la página de búsqueda una sola vez"""
+        if self.is_prepared and self.current_page == page:
+            return True
+            
+        logger.info("Preparando página de búsqueda...")
+        try:
+            await page.goto("https://sipi.sic.gov.co/sipi/Extra/Default.aspx", wait_until='networkidle')
+            await click_with_retry(page, '#MainContent_lnkTMSearch', logger)
+            await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkAdvanceSearch', logger)
+            await page.wait_for_selector("#MainContent_ctrlTMSearch_txtCalCreationDateStart", state='visible')
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSearch", logger)
+            await wait_hidden_overlay(page)
+            
+            state_index = '0' if case_state.strip().lower() == 'active' else '1'
+            state_selector = f"#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_rbtnlLive_{state_index}"
+            logger.info(f"Seleccionando estado: {case_state}")
+            await page.wait_for_selector(state_selector, state='visible', timeout=20000)
+            await click_with_retry(page, state_selector, logger)
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_lnkbtnSearch > span.ui-button-text", logger)
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_ctrlCaseStatusList_gvCaseStatuss > tbody > tr.gridview_pager.alt1 > td > div:nth-child(1) > a:nth-child(1)", logger)
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSelect > span.ui-button-text", logger)
+            
+            self.is_prepared = True
+            self.current_page = page
+            logger.info("Página preparada exitosamente")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error preparando página de búsqueda: {e}")
+            self.is_prepared = False
+            return False
+
+# Instancia global del estado de navegación
+nav_state = NavigationState()
+
+# Las funciones auxiliares existentes (try_get_text, get_image_url, etc.) se mantienen igual
 async def try_get_text(page, selector, logger, use_inner_html=False, retries=3):
     """Tries to get the text of an element, with retries."""
     for attempt in range(retries):
@@ -172,7 +217,8 @@ async def extract_all_pages_data(page, logger):
             
     return all_cases
 
-async def scrape_by_date_range(page: Page, start_date, end_date, case_state, logger, global_retries=3):
+async def scrape_by_date_range(page, start_date, end_date, case_state, logger, global_retries=3):
+    """Versión optimizada que reutiliza la sesión de navegación"""
     start_safe, end_safe, global_attempt = start_date.replace("/", "_"), end_date.replace("/", "_"), 0
     normalized_state = (case_state or 'inactive').strip().lower()
     if normalized_state not in ('active', 'inactive'):
@@ -183,26 +229,15 @@ async def scrape_by_date_range(page: Page, start_date, end_date, case_state, log
     output_tag = 'ACTIVE' if normalized_state == 'active' else 'INACTIVE'
     output_filename = f'{DOWNLOADS_PATH}{start_safe}_{end_safe}_{output_tag}.json'
     
+    # Preparar página solo si es necesario
+    if not await nav_state.prepare_search_page(page, normalized_state, logger):
+        logger.error("No se pudo preparar la página de búsqueda")
+        return
+    
     while global_attempt < global_retries:
         global_attempt += 1
         try:
-            page.set_default_timeout(120000)
-            
-            await page.goto("https://sipi.sic.gov.co/sipi/Extra/Default.aspx", wait_until='networkidle')
-            await click_with_retry(page, '#MainContent_lnkTMSearch', logger)
-            await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkAdvanceSearch', logger)
-            await page.wait_for_selector("#MainContent_ctrlTMSearch_txtCalCreationDateStart", state='visible')
-            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSearch", logger)
-            await wait_hidden_overlay(page)
-            
-            state_selector = f"#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_rbtnlLive_{state_index}"
-            logger.info(f"Selecting state: {normalized_state}")
-            await page.wait_for_selector(state_selector, state='visible', timeout=20000)
-            await click_with_retry(page, state_selector, logger)
-            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_lnkbtnSearch > span.ui-button-text", logger)
-            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_ctrlCaseStatusList_gvCaseStatuss > tbody > tr.gridview_pager.alt1 > td > div:nth-child(1) > a:nth-child(1)", logger)
-            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSelect > span.ui-button-text", logger)
-            
+            # Solo cambiar las fechas y ejecutar búsqueda
             await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateStart').value = '{start_date}';")
             await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateEnd').value = '{end_date}';")
             await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkbtnSearch > span.ui-button-text', logger)
@@ -255,31 +290,20 @@ async def scrape_by_date_range(page: Page, start_date, end_date, case_state, log
                 raise e
             await asyncio.sleep(2 ** global_attempt + random.random())
 
-async def scrape_by_niza_class(page: Page, niza_class, logger, global_retries=3):
+async def scrape_by_niza_class(page, niza_class, logger, global_retries=3):
+    """Versión optimizada para scraping por clase Niza"""
     start, end, case_state = "01/01/1900", "01/01/1900", 'active'
     output_filename = f'{DOWNLOADS_PATH}niza_{niza_class}_1900_1900_ACTIVE.json'
     global_attempt, state_index = 0, '0'
     
+    # Preparar página solo si es necesario
+    if not await nav_state.prepare_search_page(page, case_state, logger):
+        logger.error("No se pudo preparar la página de búsqueda")
+        return
+    
     while global_attempt < global_retries:
         global_attempt += 1
         try:
-            page.set_default_timeout(120000)
-
-            await page.goto("https://sipi.sic.gov.co/sipi/Extra/Default.aspx", wait_until='networkidle')
-            await click_with_retry(page, '#MainContent_lnkTMSearch', logger)
-            await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkAdvanceSearch', logger)
-            await page.wait_for_selector("#MainContent_ctrlTMSearch_txtCalCreationDateStart", state='visible')
-            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSearch", logger)
-            await wait_hidden_overlay(page)
-            
-            state_selector = f"#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_rbtnlLive_{state_index}"
-            logger.info(f"Selecting state: {case_state}")
-            await page.wait_for_selector(state_selector, state='visible', timeout=20000)
-            await click_with_retry(page, state_selector, logger)
-            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_lnkbtnSearch > span.ui-button-text", logger)
-            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_ctrlCaseStatusList_gvCaseStatuss > tbody > tr.gridview_pager.alt1 > td > div:nth-child(1) > a:nth-child(1)", logger)
-            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSelect > span.ui-button-text", logger)
-            
             logger.info(f"Filtering by Niza Class: {niza_class}")
             await page.fill("#MainContent_ctrlTMSearch_txtNiceClassification", str(niza_class))
             await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateStart').value = '{start}';")
