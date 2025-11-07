@@ -23,7 +23,7 @@ class DatabaseManager:
         try:
             conn = psycopg2.connect(**self.db_params)
             with conn.cursor() as cur:
-                query = f'SELECT "request_number" FROM {self.table_name} WHERE "status" IN %s AND "badger_country" = \'COLOMBIA\';'
+                query = f'SELECT "request_number" FROM {self.table_name} WHERE "status" IN %s;'
                 cur.execute(query, (self.ACTIVE_STATES,))
                 results = {row[0] for row in cur.fetchall()}
                 self.logger.info(f"Fetched {len(results)} active records from the database.")

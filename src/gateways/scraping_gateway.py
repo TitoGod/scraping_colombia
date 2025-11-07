@@ -9,55 +9,10 @@ from datetime import datetime
 import pandas as pd
 from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeoutError
 from src.utils.constants import PATHS
-from src.gateways.browser_manager import browser_manager
 
 DOWNLOADS_PATH = PATHS["tmp_path"]
 
-class NavigationState:
-    """Mantiene el estado de navegación para reutilizar sesiones"""
-    
-    def __init__(self):
-        self.is_prepared = False
-        self.current_page = None
-        
-    async def prepare_search_page(self, page, case_state, logger):
-        """Prepara la página de búsqueda una sola vez"""
-        if self.is_prepared and self.current_page == page:
-            return True
-            
-        logger.info("Preparando página de búsqueda...")
-        try:
-            await page.goto("https://sipi.sic.gov.co/sipi/Extra/Default.aspx", wait_until='networkidle')
-            await click_with_retry(page, '#MainContent_lnkTMSearch', logger)
-            await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkAdvanceSearch', logger)
-            await page.wait_for_selector("#MainContent_ctrlTMSearch_txtCalCreationDateStart", state='visible')
-            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSearch", logger)
-            await wait_hidden_overlay(page)
-            
-            state_index = '0' if case_state.strip().lower() == 'active' else '1'
-            state_selector = f"#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_rbtnlLive_{state_index}"
-            logger.info(f"Seleccionando estado: {case_state}")
-            await page.wait_for_selector(state_selector, state='visible', timeout=20000)
-            await click_with_retry(page, state_selector, logger)
-            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_lnkbtnSearch > span.ui-button-text", logger)
-            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_ctrlCaseStatusList_gvCaseStatuss > tbody > tr.gridview_pager.alt1 > td > div:nth-child(1) > a:nth-child(1)", logger)
-            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSelect > span.ui-button-text", logger)
-            
-            self.is_prepared = True
-            self.current_page = page
-            logger.info("Página preparada exitosamente")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error preparando página de búsqueda: {e}")
-            self.is_prepared = False
-            return False
-
-# Instancia global del estado de navegación
-nav_state = NavigationState()
-
-# Las funciones auxiliares existentes (try_get_text, get_image_url, etc.) se mantienen igual
-async def try_get_text(page, selector, logger, use_inner_html=False, retries=3):
+async def try_get_text(page, selector, use_inner_html=False, retries=3):
     """Tries to get the text of an element, with retries."""
     for attempt in range(retries):
         try:
@@ -74,7 +29,7 @@ async def try_get_text(page, selector, logger, use_inner_html=False, retries=3):
             if attempt < retries - 1:
                 await asyncio.sleep(1)
             else:
-                logger.warning(f"Warning: Error trying to get text for {selector}: {str(e)}")
+                print(f"Warning: Error trying to get text for {selector}: {str(e)}")
     return ""
 
 async def get_image_url(page, selector):
@@ -92,7 +47,7 @@ async def wait_hidden_overlay(page, timeout=120000):
     except Exception:
         pass
 
-async def click_with_retry(page, selector, logger, retries=3, wait_for_visible=True, timeout=120000, sleep_between=1):
+async def click_with_retry(page, selector, retries=3, wait_for_visible=True, timeout=120000, sleep_between=1):
     """Performs a robust click with retries."""
     last_exc = None
     safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', selector)
@@ -106,7 +61,7 @@ async def click_with_retry(page, selector, logger, retries=3, wait_for_visible=T
             return True
         except Exception as e:
             last_exc = e
-            logger.warning(f"[click_with_retry] Attempt {attempt}/{retries} failed for {selector}: {str(e)}")
+            print(f"Warning: [click_with_retry] Attempt {attempt}/{retries} failed for {selector}: {e}")
             if attempt < retries: await asyncio.sleep(sleep_between * attempt)
     raise last_exc
 
@@ -126,28 +81,28 @@ async def wait_for_any(page, selectors, timeout=120000, poll_interval=0.5):
         if asyncio.get_event_loop().time() > deadline: return None
         await asyncio.sleep(poll_interval)
 
-async def extract_row_data(page, i, logger):
+async def extract_row_data(page, i):
     """Extracts data from a single row of the results table."""
-    filing_date_header = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child(1) > th:nth-child(6)', logger)
-    request_number = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(2)', logger)
-    registry_number = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(3)', logger)
-    denomination = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(4)', logger)
+    filing_date_header = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child(1) > th:nth-child(6)')
+    request_number = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(2)')
+    registry_number = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(3)')
+    denomination = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(4)')
     logo_url = await get_image_url(page, f'//*[@id="MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases_hlnkCasePicture_{i-2}"]')
     
     if 'Fecha de radicación' in filing_date_header:
-        filing_date = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(6)', logger)
-        expiration_date = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(7)', logger)
-        status = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(8)', logger)
-        holder = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(9)', logger, use_inner_html=True)
-        niza_class = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(10)', logger)
-        gazette_number = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(11)', logger)
+        filing_date = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(6)')
+        expiration_date = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(7)')
+        status = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(8)')
+        holder = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(9)', use_inner_html=True)
+        niza_class = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(10)')
+        gazette_number = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(11)')
     else:
         filing_date = ""
-        expiration_date = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(6)', logger)
-        status = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(7)', logger)
-        holder = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(8)', logger, use_inner_html=True)
-        niza_class = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(9)', logger)
-        gazette_number = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(10)', logger)
+        expiration_date = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(6)')
+        status = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(7)')
+        holder = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(8)', use_inner_html=True)
+        niza_class = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(9)')
+        gazette_number = await try_get_text(page, f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({i}) > td:nth-child(10)')
         
     case_data = {"request_number": request_number, "registry_number": registry_number, "denomination": denomination, "logo_url": str(logo_url), "filing_date": filing_date, "expiration_date": expiration_date, "status": status, "holder": holder, "niza_class": niza_class, "gazette_number": gazette_number}
     return case_data if any(case_data.values()) else None
@@ -171,12 +126,8 @@ async def extract_all_pages_data(page, logger):
         for row_index in range(2, 203):
             first_cell_selector = f'#MainContent_ctrlTMSearch_ctrlProcList_gvwIPCases > tbody > tr:nth-child({row_index}) > td:nth-child(2)'
             if await page.locator(first_cell_selector).count() > 0:
-                try:
-                    case_data = await extract_row_data(page, row_index, logger)
-                    if case_data: all_cases.append(case_data)
-                except Exception as e:
-                    logger.warning(f"Failed to parse row {row_index} on page {current_page_num}. Skipping row.")
-                    logger.debug(f"Row parsing error details: {e}", exc_info=True)
+                case_data = await extract_row_data(page, row_index)
+                if case_data: all_cases.append(case_data)
             else:
                 break
                 
@@ -184,41 +135,27 @@ async def extract_all_pages_data(page, logger):
         if await page.locator(next_page_selector).count() > 0:
             current_page_num += 1
             logger.info(f"Navigating to the next page (now {current_page_num})...")
-            
             target_href = await page.locator(next_page_selector).get_attribute('href')
-            if not target_href:
-                logger.warning("Next page link does not have an href attribute. Ending pagination.")
-                break
-                
-            match = re.search(r"__doPostBack\('([^']*)','([^']*)'", target_href)
-            if not match:
-                logger.warning("Could not extract PostBack event from the link. Ending pagination.")
-                break
-                
-            event_target, event_argument = match.group(1), match.group(2)
-            
-            pagination_retries = 3
-            for attempt in range(pagination_retries):
-                try:
+            if target_href:
+                match = re.search(r"__doPostBack\('([^']*)','([^']*)'", target_href)
+                if match:
+                    event_target, event_argument = match.group(1), match.group(2)
                     await page.evaluate(f"__doPostBack('{event_target}', '{event_argument}')")
                     await page.wait_for_load_state('networkidle', timeout=90000)
                     logger.info(f"Navigation to page {current_page_num} completed.")
+                else:
+                    logger.warning("Could not extract PostBack event from the link. Ending pagination.")
                     break
-                except Exception as e:
-                    logger.warning(f"Failed to navigate to page {current_page_num} (Attempt {attempt+1}/{pagination_retries}): {e}")
-                    if attempt + 1 == pagination_retries:
-                        logger.error(f"Failed to navigate to page {current_page_num} after {pagination_retries} attempts. Stopping extraction for this date range.")
-                        return all_cases
-                    await asyncio.sleep(3 * (attempt + 1))
-
+            else:
+                logger.warning("Next page link does not have an href attribute. Ending pagination.")
+                break
         else:
             logger.info("No more pages found. End of extraction.")
             break
             
     return all_cases
 
-async def scrape_by_date_range(page, start_date, end_date, case_state, logger, global_retries=3):
-    """Versión optimizada que reutiliza la sesión de navegación"""
+async def scrape_by_date_range(page: Page, start_date, end_date, case_state, logger, global_retries=3):
     start_safe, end_safe, global_attempt = start_date.replace("/", "_"), end_date.replace("/", "_"), 0
     normalized_state = (case_state or 'inactive').strip().lower()
     if normalized_state not in ('active', 'inactive'):
@@ -229,18 +166,29 @@ async def scrape_by_date_range(page, start_date, end_date, case_state, logger, g
     output_tag = 'ACTIVE' if normalized_state == 'active' else 'INACTIVE'
     output_filename = f'{DOWNLOADS_PATH}{start_safe}_{end_safe}_{output_tag}.json'
     
-    # Preparar página solo si es necesario
-    if not await nav_state.prepare_search_page(page, normalized_state, logger):
-        logger.error("No se pudo preparar la página de búsqueda")
-        return
-    
     while global_attempt < global_retries:
         global_attempt += 1
         try:
-            # Solo cambiar las fechas y ejecutar búsqueda
+            page.set_default_timeout(120000)
+            
+            await page.goto("https://sipi.sic.gov.co/sipi/Extra/Default.aspx", wait_until='networkidle')
+            await click_with_retry(page, '#MainContent_lnkTMSearch')
+            await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkAdvanceSearch')
+            await page.wait_for_selector("#MainContent_ctrlTMSearch_txtCalCreationDateStart", state='visible')
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSearch")
+            await wait_hidden_overlay(page)
+            
+            state_selector = f"#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_rbtnlLive_{state_index}"
+            logger.info(f"Selecting state: {normalized_state}")
+            await page.wait_for_selector(state_selector, state='visible', timeout=20000)
+            await click_with_retry(page, state_selector)
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_lnkbtnSearch > span.ui-button-text")
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_ctrlCaseStatusList_gvCaseStatuss > tbody > tr.gridview_pager.alt1 > td > div:nth-child(1) > a:nth-child(1)")
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSelect > span.ui-button-text")
+            
             await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateStart').value = '{start_date}';")
             await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateEnd').value = '{end_date}';")
-            await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkbtnSearch > span.ui-button-text', logger)
+            await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkbtnSearch > span.ui-button-text')
             
             found = await wait_for_any(page, [{'selector': "#MainContent_ctrlTMSearch_ctrlProcList_hdrNbItems"}, {'selector': "#MainContent_ctrlTM_panelCaseData"}], timeout=30000)
             if not found:
@@ -249,7 +197,7 @@ async def scrape_by_date_range(page, start_date, end_date, case_state, logger, g
                         return
                 raise RuntimeError("The results page did not load.")
                 
-            if "2000" in (await try_get_text(page, "#MainContent_ctrlTMSearch_ctrlProcList_hdrNbItems", logger) or ""):
+            if "2000" in (await try_get_text(page, "#MainContent_ctrlTMSearch_ctrlProcList_hdrNbItems") or ""):
                 logger.warning(f"SKIPPED RANGE: The range {start_date} - {end_date} exceeded the 2000 trademark limit and will not be processed.")
                 return
                 
@@ -269,7 +217,7 @@ async def scrape_by_date_range(page, start_date, end_date, case_state, logger, g
                         await results_per_page_dropdown.select_option(value="200")
                         await page.wait_for_load_state('networkidle', timeout=60000)
             except Exception as e:
-                logger.warning(f"An error occurred while configuring the results view. Scraping will continue with default view settings. Error: {e}")
+                logger.warning(f"An error occurred while configuring the results view. Continuing. Error: {e}")
                 
             list_cases = await extract_all_pages_data(page, logger)
             with open(output_filename, 'w', encoding='utf-8') as json_file:
@@ -284,31 +232,42 @@ async def scrape_by_date_range(page, start_date, end_date, case_state, logger, g
             
         except Exception as e:
             logger.error(f"[scrape_by_date_range] Attempt {global_attempt}/{global_retries} failed for {start_date} - {end_date}: {e}", exc_info=True)
+            rollbar.report_exc_info()
             if global_attempt >= global_retries:
                 logger.critical(f"{start_date} - {end_date} -> Failed after {global_retries} attempts.")
-                rollbar.report_exc_info()
-                raise e
+                return
             await asyncio.sleep(2 ** global_attempt + random.random())
 
-async def scrape_by_niza_class(page, niza_class, logger, global_retries=3):
-    """Versión optimizada para scraping por clase Niza"""
+async def scrape_by_niza_class(page: Page, niza_class, logger, global_retries=3):
     start, end, case_state = "01/01/1900", "01/01/1900", 'active'
     output_filename = f'{DOWNLOADS_PATH}niza_{niza_class}_1900_1900_ACTIVE.json'
     global_attempt, state_index = 0, '0'
     
-    # Preparar página solo si es necesario
-    if not await nav_state.prepare_search_page(page, case_state, logger):
-        logger.error("No se pudo preparar la página de búsqueda")
-        return
-    
     while global_attempt < global_retries:
         global_attempt += 1
         try:
+            page.set_default_timeout(120000)
+
+            await page.goto("https://sipi.sic.gov.co/sipi/Extra/Default.aspx", wait_until='networkidle')
+            await click_with_retry(page, '#MainContent_lnkTMSearch')
+            await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkAdvanceSearch')
+            await page.wait_for_selector("#MainContent_ctrlTMSearch_txtCalCreationDateStart", state='visible')
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSearch")
+            await wait_hidden_overlay(page)
+            
+            state_selector = f"#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_rbtnlLive_{state_index}"
+            logger.info(f"Selecting state: {case_state}")
+            await page.wait_for_selector(state_selector, state='visible', timeout=20000)
+            await click_with_retry(page, state_selector)
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_lnkbtnSearch > span.ui-button-text")
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_ctrlCaseStatusSearch_ctrlCaseStatusList_gvCaseStatuss > tbody > tr.gridview_pager.alt1 > td > div:nth-child(1) > a:nth-child(1)")
+            await click_with_retry(page, "#MainContent_ctrlTMSearch_ctrlCaseStatusSearchDialog_lnkBtnSelect > span.ui-button-text")
+            
             logger.info(f"Filtering by Niza Class: {niza_class}")
             await page.fill("#MainContent_ctrlTMSearch_txtNiceClassification", str(niza_class))
             await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateStart').value = '{start}';")
             await page.evaluate(f"document.querySelector('#MainContent_ctrlTMSearch_txtCalCreationDateEnd').value = '{end}';")
-            await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkbtnSearch > span.ui-button-text', logger)
+            await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkbtnSearch > span.ui-button-text')
             
             found = await wait_for_any(page, [{'selector': "#MainContent_ctrlTMSearch_ctrlProcList_hdrNbItems"}, {'selector': "#MainContent_ctrlTM_panelCaseData"}], timeout=30000)
             if not found:
@@ -318,7 +277,7 @@ async def scrape_by_niza_class(page, niza_class, logger, global_retries=3):
                         return
                 raise RuntimeError("The results page did not load.")
                 
-            if "2000" in (await try_get_text(page, "#MainContent_ctrlTMSearch_ctrlProcList_hdrNbItems", logger) or ""):
+            if "2000" in (await try_get_text(page, "#MainContent_ctrlTMSearch_ctrlProcList_hdrNbItems") or ""):
                 logger.warning(f"SKIPPED RANGE: Niza class {niza_class} exceeded the 2000 trademark limit.")
                 return
 
@@ -348,10 +307,10 @@ async def scrape_by_niza_class(page, niza_class, logger, global_retries=3):
             
         except Exception as e:
             logger.error(f"[scrape_by_niza_class] Attempt {global_attempt}/{global_retries} failed for Niza {niza_class}: {e}", exc_info=True)
+            rollbar.report_exc_info()
             if global_attempt >= global_retries:
                 logger.critical(f"Niza {niza_class} -> Failed after {global_retries} attempts.")
-                rollbar.report_exc_info()
-                raise e
+                return
             await asyncio.sleep(2 ** global_attempt + random.random())
 
 async def _extract_status_with_retries(page, logger, max_attempts=4):
@@ -382,12 +341,11 @@ async def scrape_request_by_number(page, request_number, logger):
     logger.info(f"Starting scrape for request_number: {request_number}")
     try:
         await page.goto("https://sipi.sic.gov.co/sipi/Extra/Default.aspx", wait_until='networkidle')
-
-        await click_with_retry(page, '#MainContent_lnkTMSearch', logger)
+        await click_with_retry(page, '#MainContent_lnkTMSearch')
         
         await page.wait_for_selector('#MainContent_ctrlTMSearch_txtAppNr', state='visible', timeout=20000)
         await page.fill('#MainContent_ctrlTMSearch_txtAppNr', request_number)
-        await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkbtnSearch', logger)
+        await click_with_retry(page, '#MainContent_ctrlTMSearch_lnkbtnSearch')
         await page.wait_for_load_state('networkidle', timeout=60000)
         status = await _extract_status_with_retries(page, logger)
         if status:
@@ -396,7 +354,7 @@ async def scrape_request_by_number(page, request_number, logger):
         result_link_selector = '#MainContent_ctrlTMSearch_gvSearchResults a'
         if await page.locator(result_link_selector).count() > 0:
             logger.info("Found a link in the results, clicking it...")
-            await click_with_retry(page, result_link_selector, logger)
+            await click_with_retry(page, result_link_selector)
             await page.wait_for_load_state('networkidle', timeout=60000)
             status = await _extract_status_with_retries(page, logger, max_attempts=5)
             if status:
